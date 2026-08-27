@@ -23,6 +23,95 @@ if (-not $isAdmin) {
     exit
 }
 
+# --- Shared Helpers ---
+$script:BackupDir  = Join-Path $env:ProgramData "NetDoctor"
+$script:BackupPath = Join-Path $script:BackupDir "settings-backup.json"
+
+function Get-PhysicalAdapters {
+    $adapters = Get-NetAdapter | Where-Object {
+        $_.Status -eq "Up" -and
+        $_.InterfaceDescription -notlike "*Hyper-V*" -and
+        $_.InterfaceDescription -notlike "*Wintun*" -and
+        $_.InterfaceDescription -notlike "*Virtual*" -and
+        $_.InterfaceDescription -notlike "*Loopback*" -and
+        $_.InterfaceDescription -notlike "*TAP-*" -and
+        $_.InterfaceDescription -notlike "*VPN*"
+    }
+    if (-not $adapters) { $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } }
+    return $adapters
+}
+
+function Get-PingStats {
+    # .NET Ping: locale-independent and identical on PowerShell 5.1 and 7+
+    # (Test-Connection exposes ResponseTime on 5.1 but Latency on 7, and 7 emits
+    #  an object even for failed pings, which broke the old loss calculation)
+    param([string]$Target, [int]$Count = 10, [int]$TimeoutMs = 2000)
+    $pinger = New-Object System.Net.NetworkInformation.Ping
+    $times = New-Object System.Collections.Generic.List[double]
+    $lost = 0
+    try {
+        for ($i = 0; $i -lt $Count; $i++) {
+            try {
+                $reply = $pinger.Send($Target, $TimeoutMs)
+                if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+                    [void]$times.Add([double]$reply.RoundtripTime)
+                } else { $lost++ }
+            } catch { $lost++ }
+            if ($i -lt ($Count - 1)) { Start-Sleep -Milliseconds 100 }
+        }
+    } finally { $pinger.Dispose() }
+
+    $avg = 0.0; $jitter = 0.0
+    if ($times.Count -gt 0) {
+        $avg = [math]::Round(($times | Measure-Object -Average).Average, 1)
+        if ($times.Count -gt 1) {
+            # Jitter as standard deviation - max-minus-min let one outlier dominate
+            $variance = ($times | ForEach-Object { [math]::Pow($_ - $avg, 2) } | Measure-Object -Average).Average
+            $jitter = [math]::Round([math]::Sqrt($variance), 1)
+        }
+    }
+    return @{
+        Avg     = $avg
+        Jitter  = $jitter
+        LossPct = [math]::Round(($lost / $Count) * 100, 0)
+        Sent    = $Count
+        Lost    = $lost
+    }
+}
+
+function Test-MtuPayload {
+    # ICMP echo with Don't-Fragment set. Two attempts so one transient drop
+    # does not mislabel a payload size as fragmenting.
+    param([string]$Target, [int]$PayloadSize, [int]$TimeoutMs = 2000)
+    $pinger = New-Object System.Net.NetworkInformation.Ping
+    try {
+        $opts = New-Object System.Net.NetworkInformation.PingOptions
+        $opts.DontFragment = $true
+        $buffer = New-Object byte[] $PayloadSize
+        for ($attempt = 0; $attempt -lt 2; $attempt++) {
+            try {
+                $reply = $pinger.Send($Target, $TimeoutMs, $buffer, $opts)
+                if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) { return $true }
+            } catch { }
+        }
+        return $false
+    } finally { $pinger.Dispose() }
+}
+
+function Find-OptimalPayload {
+    # Binary search for the largest unfragmented payload. Returns 0 when even
+    # the floor fails (network unreachable or heavily filtered path).
+    param([string]$Target, [int]$Floor = 1200, [int]$Ceiling = 1472)
+    if (Test-MtuPayload -Target $Target -PayloadSize $Ceiling) { return $Ceiling }
+    if (-not (Test-MtuPayload -Target $Target -PayloadSize $Floor)) { return 0 }
+    $low = $Floor; $high = $Ceiling
+    while (($high - $low) -gt 1) {
+        $mid = [int][math]::Floor(($low + $high) / 2)
+        if (Test-MtuPayload -Target $Target -PayloadSize $mid) { $low = $mid } else { $high = $mid }
+    }
+    return $low
+}
+
 function Show-Header {
     Clear-Host
     Write-Host "==========================================================================" -ForegroundColor Cyan
@@ -70,14 +159,7 @@ function Run-Diagnostics {
         Write-Host "--- [1/5] SCANNING NETWORK HARDWARE & LINK SPEED ---" -ForegroundColor Yellow
     }
     
-    $adapters = Get-NetAdapter | Where-Object { 
-        $_.Status -eq "Up" -and 
-        $_.InterfaceDescription -notlike "*Hyper-V*" -and 
-        $_.InterfaceDescription -notlike "*Wintun*" -and 
-        $_.InterfaceDescription -notlike "*Virtual*" -and 
-        $_.InterfaceDescription -notlike "*Loopback*"
-    }
-    if (-not $adapters) { $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } }
+    $adapters = Get-PhysicalAdapters
 
     $issues = @()
     $adapterDetails = @()
@@ -109,27 +191,15 @@ function Run-Diagnostics {
         Write-Host "--- [2/5] RUNNING PATH MTU DISCOVERY (PACKET FRAGMENTATION CHECK) ---" -ForegroundColor Yellow
     }
     $target = "8.8.8.8"
-    $testSizes = @(1472, 1464, 1452, 1420, 1372)
-    $optimalPayload = 0
-
-    foreach ($size in $testSizes) {
-        $pingRes = ping $target -f -l $size -n 1
-        $isFrag = $pingRes | Where-Object { $_ -like "*fragmented*" -or $_ -like "*DF set*" }
-        $isReply = $pingRes | Where-Object { $_ -like "*Reply from*" }
-
-        if ($isReply -and -not $isFrag) {
-            $optimalPayload = $size
-            if (-not $Silent) {
-                Write-Host "    Payload $size B (+28B Header = MTU $($size+28)): PASS (No Packet Drops)" -ForegroundColor Green
-            }
-            break
+    $optimalPayload = Find-OptimalPayload -Target $target
+    $optimalMTU = if ($optimalPayload -gt 0) { $optimalPayload + 28 } else { 1492 }
+    if (-not $Silent) {
+        if ($optimalPayload -gt 0) {
+            Write-Host "    Largest unfragmented payload: $optimalPayload B (+28 B header = MTU $optimalMTU)" -ForegroundColor Green
         } else {
-            if (-not $Silent) {
-                Write-Host "    Payload $size B (+28B Header = MTU $($size+28)): FAILED (Fragmentation Drops)" -ForegroundColor Red
-            }
+            Write-Host "    MTU sweep inconclusive (no unfragmented replies). Assuming PPPoE-safe MTU 1492." -ForegroundColor Yellow
         }
     }
-    $optimalMTU = if ($optimalPayload -gt 0) { $optimalPayload + 28 } else { 1492 }
 
     foreach ($ad in $adapterDetails) {
         if ($ad.MTU -gt $optimalMTU) {
@@ -193,27 +263,22 @@ function Run-Diagnostics {
         Write-Host ""
         Write-Host "--- [4/5] MEASURING IN-GAME PING, JITTER & PACKET LOSS ---" -ForegroundColor Yellow
     }
-    $gw = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway }).IPv4DefaultGateway.NextHop
+    $gw = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway }).IPv4DefaultGateway.NextHop | Select-Object -First 1
     $gwLatency = 0
     if ($gw) {
-        $gwPings = Test-Connection -ComputerName $gw -Count 5 -ErrorAction SilentlyContinue
-        if ($gwPings) {
-            $gwLatency = [math]::Round(($gwPings | Measure-Object -Property ResponseTime -Average).Average, 1)
-            if (-not $Silent) { Write-Host "    Local Router Hop ($gw): $gwLatency ms (0% Loss)" -ForegroundColor Green }
+        $gwStats = Get-PingStats -Target $gw -Count 5
+        $gwLatency = $gwStats.Avg
+        if (-not $Silent) {
+            $gwColor = if ($gwStats.LossPct -eq 0) { "Green" } else { "Yellow" }
+            Write-Host "    Gateway ($gw): avg $($gwStats.Avg) ms | jitter $($gwStats.Jitter) ms | loss $($gwStats.LossPct)%" -ForegroundColor $gwColor
         }
     }
 
-    $wanPings = Test-Connection -ComputerName "8.8.8.8" -Count 10 -ErrorAction SilentlyContinue
-    $wanAvg = 0; $wanJitter = 0; $wanLoss = 0
-    if ($wanPings) {
-        $wanAvg = [math]::Round(($wanPings | Measure-Object -Property ResponseTime -Average).Average, 1)
-        $wanMin = ($wanPings | Measure-Object -Property ResponseTime -Minimum).Minimum
-        $wanMax = ($wanPings | Measure-Object -Property ResponseTime -Maximum).Maximum
-        $wanJitter = [math]::Round($wanMax - $wanMin, 1)
-        $wanLoss = (10 - $wanPings.Count) * 10
-        if (-not $Silent) {
-            Write-Host "    Internet Latency (8.8.8.8): $wanAvg ms | Jitter: $wanJitter ms | Loss: $wanLoss%" -ForegroundColor $(if ($wanLoss -eq 0) { "Green" } else { "Red" })
-        }
+    $wanStats = Get-PingStats -Target "8.8.8.8" -Count 10
+    $wanAvg = $wanStats.Avg; $wanJitter = $wanStats.Jitter; $wanLoss = $wanStats.LossPct
+    if (-not $Silent) {
+        $wanColor = if ($wanLoss -eq 0) { "Green" } else { "Red" }
+        Write-Host "    Internet (8.8.8.8): avg $wanAvg ms | jitter $wanJitter ms | loss $wanLoss%" -ForegroundColor $wanColor
     }
 
     # 5. Windows Gaming Multimedia Settings
