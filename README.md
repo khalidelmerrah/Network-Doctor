@@ -1,11 +1,11 @@
-# 🩺 NetDoctor
+# 🩺 Network-Doctor
 
 > **One-Click Windows Network Diagnostic, Path MTU Discovery & Gaming Latency Optimizer.**  
 > Zero installation. Zero external dependencies. 100% native PowerShell.
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](https://github.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](https://github.com/khalidelmerrah/Network-Doctor-)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com/khalidelmerrah/Network-Doctor-)
 
 ---
 
@@ -14,14 +14,14 @@
 Open **PowerShell as Administrator** and paste this one-liner:
 
 ```powershell
-irm https://raw.githubusercontent.com/khalid-pc/net-doctor/main/NetDoctor.ps1 | iex
+irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex
 ```
 
 *(Or download/clone this repo and double-click `NetDoctor.bat`)*
 
 ---
 
-## 🎯 What Problems Does NetDoctor Solve?
+## 🎯 What Problems Does Network-Doctor Solve?
 
 * 🔴 **Packet Loss & Rubberbanding:** Detects PPPoE / ISP MTU mismatches where oversized unfragmented frames get dropped (e.g. 1500 vs 1492 MTU).
 * 🔴 **High Jitter & Micro-Stutters:** Disables latency-inducing network card features like **Green Ethernet**, **Gigabit Lite**, and **Large Send Offload (LSO)**.
