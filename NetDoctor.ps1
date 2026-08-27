@@ -112,6 +112,37 @@ function Find-OptimalPayload {
     return $low
 }
 
+function Save-SettingsBackup {
+    # Snapshot the pre-NetDoctor state once. If a backup already exists it is
+    # kept: it represents the true original settings before any optimization.
+    param($Adapters)
+    if (Test-Path $script:BackupPath) { return $false }
+
+    $backup = @{
+        CreatedAt = (Get-Date).ToString("o")
+        Adapters  = @()
+        Registry  = @{}
+    }
+    foreach ($a in $Adapters) {
+        $ipConf = Get-NetIPInterface -InterfaceAlias $a.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue
+        $props = @(Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue |
+            Where-Object { $_.RegistryKeyword } |
+            ForEach-Object { @{ Keyword = $_.RegistryKeyword; Value = @($_.RegistryValue) } })
+        $backup.Adapters += @{
+            Name       = $a.Name
+            Mtu        = if ($ipConf) { $ipConf.NlMtu } else { 1500 }
+            Properties = $props
+        }
+    }
+    $sysProfile = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -ErrorAction SilentlyContinue
+    $backup.Registry.NetworkThrottlingIndex = if ($sysProfile -and $null -ne $sysProfile.NetworkThrottlingIndex) { [string][uint32]$sysProfile.NetworkThrottlingIndex } else { $null }
+    $backup.Registry.SystemResponsiveness  = if ($sysProfile -and $null -ne $sysProfile.SystemResponsiveness)  { [string][uint32]$sysProfile.SystemResponsiveness }  else { $null }
+
+    New-Item -ItemType Directory -Path $script:BackupDir -Force | Out-Null
+    $backup | ConvertTo-Json -Depth 6 | Set-Content -Path $script:BackupPath -Encoding UTF8
+    return $true
+}
+
 function Show-Header {
     Clear-Host
     Write-Host "==========================================================================" -ForegroundColor Cyan
@@ -319,6 +350,13 @@ function Apply-Optimizations {
     $optimalMTU = $Diag.OptimalMTU
     $adapters = $Diag.Adapters
 
+    # 0. Backup current state (first run only)
+    if (Save-SettingsBackup -Adapters $adapters) {
+        Write-Host "[0/4] Saved original settings backup to $script:BackupPath" -ForegroundColor Gray
+    } else {
+        Write-Host "[0/4] Original settings backup already exists ($script:BackupPath) - keeping it" -ForegroundColor Gray
+    }
+
     # 1. Set MTU
     Write-Host "[1/4] Setting Optimal MTU ($optimalMTU) on Network Interfaces..." -ForegroundColor Yellow
     foreach ($a in $adapters) {
@@ -368,46 +406,89 @@ function Apply-Optimizations {
 
 function Restore-Defaults {
     Show-Header
+    $hasBackup = Test-Path $script:BackupPath
     Write-Host "==========================================================================" -ForegroundColor Yellow
-    Write-Host "                  RESTORE WINDOWS DEFAULT NETWORK SETTINGS                " -ForegroundColor Yellow
+    Write-Host "                       RESTORE NETWORK SETTINGS                           " -ForegroundColor Yellow
     Write-Host "==========================================================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "This will revert your network stack back to stock Windows defaults:" -ForegroundColor White
-    Write-Host "  • Reset IPv4 MTU to standard 1500" -ForegroundColor Gray
-    Write-Host "  • Re-enable Windows Multimedia Throttling (NetworkThrottlingIndex = 10)" -ForegroundColor Gray
-    Write-Host "  • Reset SystemResponsiveness to default (20)" -ForegroundColor Gray
-    Write-Host "  • Re-enable standard NIC properties" -ForegroundColor Gray
-    Write-Host "  • Reset TCP stack to default autotuning" -ForegroundColor Gray
+    if ($hasBackup) {
+        $backupDate = try { (Get-Content $script:BackupPath -Raw | ConvertFrom-Json).CreatedAt } catch { "unknown date" }
+        Write-Host "A backup of your original settings was found (taken $backupDate)." -ForegroundColor White
+        Write-Host "This will restore, per adapter, exactly what NetDoctor found before optimizing:" -ForegroundColor White
+        Write-Host "  - Original IPv4 MTU values" -ForegroundColor Gray
+        Write-Host "  - Original NIC advanced driver properties" -ForegroundColor Gray
+        Write-Host "  - Original NetworkThrottlingIndex / SystemResponsiveness registry values" -ForegroundColor Gray
+    } else {
+        Write-Host "No NetDoctor backup found - falling back to stock Windows defaults:" -ForegroundColor White
+        Write-Host "  - IPv4 MTU 1500 on physical adapters" -ForegroundColor Gray
+        Write-Host "  - NIC advanced properties reset to driver defaults" -ForegroundColor Gray
+        Write-Host "  - NetworkThrottlingIndex = 10, SystemResponsiveness = 20" -ForegroundColor Gray
+    }
+    Write-Host "  - TCP autotuning back to normal, DNS cache flushed" -ForegroundColor Gray
     Write-Host ""
 
-    $confirm = Read-Host "Are you sure you want to restore defaults? (Y/N)"
-    if ($confirm -eq "Y" -or $confirm -eq "y") {
+    $confirm = Read-Host "Proceed with restore? (Y/N)"
+    if ($confirm -ne "Y" -and $confirm -ne "y") {
+        Write-Host "Operation cancelled." -ForegroundColor Gray
         Write-Host ""
-        Write-Host "Reverting network settings..." -ForegroundColor Yellow
+        Read-Host "Press Enter to return to menu..."
+        return
+    }
 
-        # 1. Reset MTU to 1500
-        $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
-        foreach ($a in $adapters) {
-            netsh interface ipv4 set subinterface "$($a.Name)" mtu=1500 store=persistent | Out-Null
-            Write-Host "  [OK] Reset MTU on '$($a.Name)' to 1500" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Reverting network settings..." -ForegroundColor Yellow
+    $sysProfile = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
+
+    if ($hasBackup) {
+        $backup = Get-Content $script:BackupPath -Raw | ConvertFrom-Json
+
+        foreach ($ba in $backup.Adapters) {
+            if (-not (Get-NetAdapter -Name $ba.Name -ErrorAction SilentlyContinue)) {
+                Write-Host "  [SKIP] Adapter '$($ba.Name)' from backup no longer present" -ForegroundColor Yellow
+                continue
+            }
+            netsh interface ipv4 set subinterface "$($ba.Name)" mtu=$($ba.Mtu) store=persistent | Out-Null
+            $restored = 0; $failed = 0
+            foreach ($p in $ba.Properties) {
+                Set-NetAdapterAdvancedProperty -Name $ba.Name -RegistryKeyword $p.Keyword -RegistryValue @($p.Value) -ErrorAction SilentlyContinue
+                if ($?) { $restored++ } else { $failed++ }
+            }
+            Write-Host "  [OK] '$($ba.Name)': MTU restored to $($ba.Mtu), $restored driver properties restored$(if ($failed) { ", $failed skipped" })" -ForegroundColor Green
         }
 
-        # 2. Reset Multimedia Throttling Registry
-        $sysProfile = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
+        foreach ($regName in @("NetworkThrottlingIndex", "SystemResponsiveness")) {
+            $val = $backup.Registry.$regName
+            if ($null -ne $val -and "$val" -ne "") {
+                Set-ItemProperty -Path $sysProfile -Name $regName -Value ([uint32]"$val") -Type DWord -Force -ErrorAction SilentlyContinue
+                Write-Host "  [OK] $regName restored to $val" -ForegroundColor Green
+            } else {
+                Remove-ItemProperty -Path $sysProfile -Name $regName -Force -ErrorAction SilentlyContinue
+                Write-Host "  [OK] $regName removed (was not set originally)" -ForegroundColor Green
+            }
+        }
+
+        Remove-Item $script:BackupPath -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Backup consumed and removed - next optimization takes a fresh snapshot" -ForegroundColor Gray
+    } else {
+        # Stock defaults path. Only touch physical adapters: forcing MTU 1500 on
+        # a VPN/virtual interface (WireGuard, Hyper-V) can break its tunnel.
+        $adapters = Get-PhysicalAdapters
+        foreach ($a in $adapters) {
+            netsh interface ipv4 set subinterface "$($a.Name)" mtu=1500 store=persistent | Out-Null
+            Reset-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*" -ErrorAction SilentlyContinue
+            Write-Host "  [OK] '$($a.Name)': MTU reset to 1500, NIC properties reset to driver defaults" -ForegroundColor Green
+        }
         Set-ItemProperty -Path $sysProfile -Name "NetworkThrottlingIndex" -Value 10 -Type DWord -Force -ErrorAction SilentlyContinue
         Set-ItemProperty -Path $sysProfile -Name "SystemResponsiveness" -Value 20 -Type DWord -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Reverted NetworkThrottlingIndex to 10 & SystemResponsiveness to 20" -ForegroundColor Green
-
-        # 3. Reset TCP Stack
-        netsh int tcp set global autotuninglevel=normal | Out-Null
-        Clear-DnsClientCache
-        Write-Host "  [OK] Reset TCP stack & flushed DNS" -ForegroundColor Green
-
-        Write-Host ""
-        Write-Host "✅ Network settings successfully restored to Windows defaults!" -ForegroundColor Green
-    } else {
-        Write-Host "Operation cancelled." -ForegroundColor Gray
+        Write-Host "  [OK] NetworkThrottlingIndex = 10, SystemResponsiveness = 20 (Windows defaults)" -ForegroundColor Green
     }
+
+    netsh int tcp set global autotuninglevel=normal | Out-Null
+    Clear-DnsClientCache
+    Write-Host "  [OK] TCP autotuning set to normal, DNS cache flushed" -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "Network settings restored successfully." -ForegroundColor Green
     Write-Host ""
     Read-Host "Press Enter to return to menu..."
 }
