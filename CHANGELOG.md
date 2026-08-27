@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.1] - 2026-08-27 (commit: pending)
+### Changed
+- Restored the gaming identity: ASCII logo, colored all-caps menu, gaming tagline, and diagnostics copy rewritten in gamer terms (lag sources, rubberbanding, ping spikes, game-ready status) - while keeping the v1.3.0 timestamped status log, change verification and backup messaging
+- README rewritten back to its gaming voice with the author's before/after fiber-line measurements (labeled as such), keeping the factual feature and backup/restore documentation
+
 ## [1.3.0] - 2026-08-27 (commit: 92a0a6e)
 ### Added
 - Settings backup: the first optimization run snapshots per-adapter MTU, all NIC advanced properties and the multimedia registry values to `%ProgramData%\NetDoctor\settings-backup.json`
