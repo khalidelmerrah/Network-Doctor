@@ -1,7 +1,19 @@
 # NetDoctor - Standalone Windows Network Optimizer & Diagnostics Tool for Gamers
-# Run directly via PowerShell (Admin): irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex
+# Run directly via PowerShell: irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$Host.UI.RawUI.WindowTitle = "NetDoctor v1.1 - Ultimate Gaming Network & Latency Optimizer"
+$Host.UI.RawUI.WindowTitle = "NetDoctor v1.2 - Ultimate Gaming Network & Latency Optimizer"
+
+# --- 1. Enforce Administrator Privileges (Auto-Elevation) ---
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "Elevating to Administrator privileges..." -ForegroundColor Yellow
+    if ($PSCommandPath) {
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    } else {
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex`"" -Verb RunAs
+    }
+    exit
+}
 
 function Show-Header {
     Clear-Host
@@ -117,36 +129,52 @@ function Run-Diagnostics {
         }
     }
 
-    # 3. NIC Driver Latency Settings
+    # 3. Multi-Vendor NIC Driver Latency Settings (Intel, Realtek, Killer, Marvell)
     if (-not $Silent) {
         Write-Host ""
-        Write-Host "--- [3/5] CHECKING GAMING LATENCY DRIVER FLAGS ---" -ForegroundColor Yellow
+        Write-Host "--- [3/5] CHECKING HARDWARE LATENCY DRIVER FLAGS (INTEL / REALTEK / KILLER) ---" -ForegroundColor Yellow
     }
     foreach ($a in $adapters) {
         $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue
         if ($props) {
-            $green = $props | Where-Object { $_.RegistryKeyword -eq "EnableGreenEthernet" }
-            $lso = $props | Where-Object { $_.RegistryKeyword -eq "*LsoV2IPv4" }
-            $flow = $props | Where-Object { $_.RegistryKeyword -eq "*FlowControl" }
-
-            if ($green -and $green.DisplayValue -eq "Enabled") {
-                $issues += "Green Ethernet / Power Throttling is Enabled on '$($a.Name)'"
-                if (-not $Silent) { Write-Host "    [!] Green Ethernet: Enabled (Increases jitter & latency)" -ForegroundColor Yellow }
-            } elseif ($green) {
-                if (-not $Silent) { Write-Host "    [OK] Green Ethernet: Disabled" -ForegroundColor Green }
+            # Check Green & Power Savings across all vendors
+            $powerSavingProps = $props | Where-Object { 
+                $_.RegistryKeyword -in @("EnableGreenEthernet", "GigaLite", "PowerSavingMode", "AdvancedEEE", "EEELinkAdvertisement", "*EnergyEfficientEthernet", "*ReduceSpeedOnPowerDown", "*PowerDownPcie", "*ModernStandby") -or
+                $_.DisplayName -like "*Green*" -or $_.DisplayName -like "*Energy Efficient*" -or $_.DisplayName -like "*Gigabit Lite*" -or $_.DisplayName -like "*Power Saving*"
             }
 
-            if ($lso -and $lso.DisplayValue -eq "Enabled") {
-                $issues += "Large Send Offload (LSO) is Enabled on '$($a.Name)'"
-                if (-not $Silent) { Write-Host "    [!] Large Send Offload: Enabled (Packet batching delay)" -ForegroundColor Yellow }
-            } elseif ($lso) {
+            $hasActivePowerSaving = $false
+            foreach ($p in $powerSavingProps) {
+                if ($p.DisplayValue -eq "Enabled" -or $p.RegistryValue -eq 1 -or $p.DisplayValue -like "*Enable*") {
+                    $hasActivePowerSaving = $true
+                    break
+                }
+            }
+
+            if ($hasActivePowerSaving) {
+                $issues += "Hardware Power Throttling / Green Ethernet is ENABLED on '$($a.Name)'"
+                if (-not $Silent) { Write-Host "    [!] Power Throttling / Green Ethernet: Enabled on $($a.Name)" -ForegroundColor Yellow }
+            } else {
+                if (-not $Silent) { Write-Host "    [OK] Hardware Power Throttling / Green Ethernet: Disabled" -ForegroundColor Green }
+            }
+
+            # Check LSO (Large Send Offload)
+            $lsoProps = $props | Where-Object { $_.RegistryKeyword -like "*LsoV2*" -or $_.DisplayName -like "*Large Send Offload*" }
+            $hasLSO = ($lsoProps | Where-Object { $_.DisplayValue -eq "Enabled" -or $_.RegistryValue -eq 1 })
+            if ($hasLSO) {
+                $issues += "Large Send Offload (LSO) is ENABLED on '$($a.Name)' (Causes packet batching jitter)"
+                if (-not $Silent) { Write-Host "    [!] Large Send Offload: Enabled (Packet batching jitter)" -ForegroundColor Yellow }
+            } else {
                 if (-not $Silent) { Write-Host "    [OK] Large Send Offload: Disabled" -ForegroundColor Green }
             }
 
-            if ($flow -and $flow.DisplayValue -ne "Disabled") {
-                $issues += "Flow Control is Enabled on '$($a.Name)'"
-                if (-not $Silent) { Write-Host "    [!] Flow Control: Enabled (Pauses game packets on burst traffic)" -ForegroundColor Yellow }
-            } elseif ($flow) {
+            # Check Flow Control
+            $flowProps = $props | Where-Object { $_.RegistryKeyword -eq "*FlowControl" -or $_.DisplayName -like "*Flow Control*" }
+            $hasFlow = ($flowProps | Where-Object { $_.DisplayValue -ne "Disabled" -and $_.RegistryValue -ne 0 })
+            if ($hasFlow) {
+                $issues += "Flow Control is ENABLED on '$($a.Name)' (Can pause UDP game packets)"
+                if (-not $Silent) { Write-Host "    [!] Flow Control: Enabled (Pauses game packets on traffic spikes)" -ForegroundColor Yellow }
+            } else {
                 if (-not $Silent) { Write-Host "    [OK] Flow Control: Disabled" -ForegroundColor Green }
             }
         }
@@ -225,18 +253,27 @@ function Apply-Optimizations {
         Write-Host "  [OK] Set MTU on '$($a.Name)' to $optimalMTU" -ForegroundColor Green
     }
 
-    # 2. Hardware Driver Properties
-    Write-Host "[2/4] Disabling Latency Flags & Enabling Instant Packet Dispatch..." -ForegroundColor Yellow
+    # 2. Hardware Driver Properties (Vendor-Neutral: Intel, Realtek, Killer, Marvell)
+    Write-Host "[2/4] Disabling Latency Flags across all NIC Vendors..." -ForegroundColor Yellow
+    $vendorKeywords = @(
+        "EnableGreenEthernet", "GigaLite", "PowerSavingMode", "AdvancedEEE", "EEELinkAdvertisement",
+        "*EnergyEfficientEthernet", "*ReduceSpeedOnPowerDown", "*PowerDownPcie", "*ModernStandby",
+        "*FlowControl", "*LsoV2IPv4", "*LsoV2IPv6"
+    )
+
     foreach ($a in $adapters) {
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "EnableGreenEthernet" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "GigaLite" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "PowerSavingMode" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "AdvancedEEE" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "EEELinkAdvertisement" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "*FlowControl" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "*LsoV2IPv4" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword "*LsoV2IPv6" -RegistryValue 0 -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Tuned NIC properties on '$($a.Name)'" -ForegroundColor Green
+        foreach ($kw in $vendorKeywords) {
+            Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword $kw -RegistryValue 0 -ErrorAction SilentlyContinue
+        }
+        # Fallback wildcard matching for proprietary displays
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Green*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Gigabit Lite*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Power Saving*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Energy Efficient*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Flow Control*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Large Send Offload*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+
+        Write-Host "  [OK] Tuned NIC power & packet flags on '$($a.Name)'" -ForegroundColor Green
     }
 
     # 3. Windows Gaming Priority & MMCSS
@@ -256,6 +293,52 @@ function Apply-Optimizations {
     Write-Host ""
 }
 
+function Restore-Defaults {
+    Show-Header
+    Write-Host "==========================================================================" -ForegroundColor Yellow
+    Write-Host "                  RESTORE WINDOWS DEFAULT NETWORK SETTINGS                " -ForegroundColor Yellow
+    Write-Host "==========================================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "This will revert your network stack back to stock Windows defaults:" -ForegroundColor White
+    Write-Host "  • Reset IPv4 MTU to standard 1500" -ForegroundColor Gray
+    Write-Host "  • Re-enable Windows Multimedia Throttling (NetworkThrottlingIndex = 10)" -ForegroundColor Gray
+    Write-Host "  • Reset SystemResponsiveness to default (20)" -ForegroundColor Gray
+    Write-Host "  • Re-enable standard NIC properties" -ForegroundColor Gray
+    Write-Host "  • Reset TCP stack to default autotuning" -ForegroundColor Gray
+    Write-Host ""
+
+    $confirm = Read-Host "Are you sure you want to restore defaults? (Y/N)"
+    if ($confirm -eq "Y" -or $confirm -eq "y") {
+        Write-Host ""
+        Write-Host "Reverting network settings..." -ForegroundColor Yellow
+
+        # 1. Reset MTU to 1500
+        $adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
+        foreach ($a in $adapters) {
+            netsh interface ipv4 set subinterface "$($a.Name)" mtu=1500 store=persistent | Out-Null
+            Write-Host "  [OK] Reset MTU on '$($a.Name)' to 1500" -ForegroundColor Green
+        }
+
+        # 2. Reset Multimedia Throttling Registry
+        $sysProfile = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
+        Set-ItemProperty -Path $sysProfile -Name "NetworkThrottlingIndex" -Value 10 -Type DWord -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $sysProfile -Name "SystemResponsiveness" -Value 20 -Type DWord -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Reverted NetworkThrottlingIndex to 10 & SystemResponsiveness to 20" -ForegroundColor Green
+
+        # 3. Reset TCP Stack
+        netsh int tcp set global autotuninglevel=normal | Out-Null
+        Clear-DnsClientCache
+        Write-Host "  [OK] Reset TCP stack & flushed DNS" -ForegroundColor Green
+
+        Write-Host ""
+        Write-Host "✅ Network settings successfully restored to Windows defaults!" -ForegroundColor Green
+    } else {
+        Write-Host "Operation cancelled." -ForegroundColor Gray
+    }
+    Write-Host ""
+    Read-Host "Press Enter to return to menu..."
+}
+
 # --- Interactive Main Loop ---
 while ($true) {
     Show-Header
@@ -263,9 +346,10 @@ while ($true) {
     Write-Host "  [2] 🔍 DIAGNOSE ONLY (Check Packet Loss, Jitter & MTU Boundary)" -ForegroundColor Yellow
     Write-Host "  [3] ⚡ APPLY GAMING OPTIMIZATIONS ONLY" -ForegroundColor Cyan
     Write-Host "  [4] 🌐 CLOUDFLARE SPEED & LOADED LATENCY TEST" -ForegroundColor Magenta
+    Write-Host "  [5] 🔄 RESTORE WINDOWS DEFAULT SETTINGS (Safety Revert)" -ForegroundColor DarkYellow
     Write-Host "  [0] ❌ EXIT" -ForegroundColor Gray
     Write-Host ""
-    $choice = Read-Host "Select an option (0-4)"
+    $choice = Read-Host "Select an option (0-5)"
 
     switch ($choice) {
         "1" {
@@ -342,6 +426,9 @@ Gaming Status: READY FOR COMPETITIVE GAMING (VALORANT / CS2 / FORTNITE / WARZONE
             Run-CloudflareTest
             Write-Host ""
             Read-Host "Press Enter to return to menu..."
+        }
+        "5" {
+            Restore-Defaults
         }
         "0" {
             exit

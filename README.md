@@ -12,7 +12,7 @@
 
 ## ⚡ Instant 1-Line Run (No Download Required)
 
-Open **PowerShell as Administrator** and paste this command:
+Open **PowerShell** (Auto-prompts for Administrator) and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex
@@ -42,8 +42,9 @@ Here are the actual results from a real gaming fiber connection before and after
    * If your ISP or Fiber connection uses **PPPoE**, standard `1500 MTU` drops up to **75%** of unfragmented gaming packets.
    * Network-Doctor sweeps packet boundaries (`1472` $\to$ `1464` $\to$ `1372`) and locks the exact optimal MTU (`1492`).
 
-2. **🔴 Removes Hardware Driver Micro-Stutters (NDIS Latency Flags):**
-   * Disables **Green Ethernet**, **Gigabit Lite**, and **Energy Efficient Ethernet (EEE)** which put the NIC to sleep and spike latency.
+2. **🔴 Removes Hardware Driver Micro-Stutters (Multi-Vendor NIC Tuning):**
+   * Universal vendor support for **Intel, Realtek, Killer, Marvell, and Aquantia** controllers.
+   * Disables **Green Ethernet**, **Energy Efficient Ethernet (EEE)**, `ReduceSpeedOnPowerDown`, and `PowerDownPcie` which put the NIC to sleep and spike latency.
    * Disables **Large Send Offload (LSO)** which delays and batches UDP game packets into chunks instead of dispatching them immediately.
    * Disables **Flow Control** which temporarily pauses game traffic whenever a background buffer fills.
 
@@ -51,8 +52,8 @@ Here are the actual results from a real gaming fiber connection before and after
    * Removes Windows Multimedia Network Throttling (`NetworkThrottlingIndex`) that throttles game packets when Discord audio or background music is playing.
    * Sets `SystemResponsiveness` to `0` for 100% CPU/Network gaming priority.
 
-4. **🔴 Blocks Windows Background Upload Drain:**
-   * Stops Windows Update Delivery Optimization P2P from quietly uploading bandwidth behind your back.
+4. **🔄 Revert / Safety Net Functionality:**
+   * Option `[5]` allows users to safely restore all stock Windows defaults (MTU 1500, default TCP stack, MMCSS throttling) with a single click.
 
 ---
 
@@ -82,9 +83,10 @@ Here are the actual results from a real gaming fiber connection before and after
   [2] 🔍 DIAGNOSE ONLY (Check Packet Loss, Jitter & MTU Boundary)
   [3] ⚡ APPLY GAMING OPTIMIZATIONS ONLY
   [4] 🌐 CLOUDFLARE SPEED & LOADED LATENCY TEST
+  [5] 🔄 RESTORE WINDOWS DEFAULT SETTINGS (Safety Revert)
   [0] ❌ EXIT
 
-Select an option (0-4):
+Select an option (0-5):
 ```
 
 ---
