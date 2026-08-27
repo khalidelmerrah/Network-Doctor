@@ -3,15 +3,23 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Host.UI.RawUI.WindowTitle = "NetDoctor v1.2 - Ultimate Gaming Network & Latency Optimizer"
 
-# --- 1. Enforce Administrator Privileges (Auto-Elevation) ---
+# --- 1. Check Administrator Privileges ---
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    Write-Host "Elevating to Administrator privileges..." -ForegroundColor Yellow
-    if ($PSCommandPath) {
-        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    } else {
-        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex`"" -Verb RunAs
-    }
+    Clear-Host
+    Write-Host "==========================================================================" -ForegroundColor Red
+    Write-Host "                ⚠️  ADMINISTRATOR PRIVILEGES REQUIRED  ⚠️                 " -ForegroundColor Yellow
+    Write-Host "==========================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host " NetDoctor needs Administrator rights to discover optimal MTU and tune " -ForegroundColor White
+    Write-Host " your network adapter's latency settings." -ForegroundColor White
+    Write-Host ""
+    Write-Host " 👉 Please open PowerShell as Administrator and re-run:" -ForegroundColor Cyan
+    Write-Host "    irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "==========================================================================" -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Press Enter to exit..."
     exit
 }
 
