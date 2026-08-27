@@ -361,7 +361,12 @@ function Apply-Optimizations {
     Write-Host "[1/4] Setting Optimal MTU ($optimalMTU) on Network Interfaces..." -ForegroundColor Yellow
     foreach ($a in $adapters) {
         netsh interface ipv4 set subinterface "$($a.Name)" mtu=$optimalMTU store=persistent | Out-Null
-        Write-Host "  [OK] Set MTU on '$($a.Name)' to $optimalMTU" -ForegroundColor Green
+        $applied = (Get-NetIPInterface -InterfaceAlias $a.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue).NlMtu
+        if ($applied -eq $optimalMTU) {
+            Write-Host "  [OK] '$($a.Name)': MTU set and verified at $optimalMTU" -ForegroundColor Green
+        } else {
+            Write-Host "  [WARN] '$($a.Name)': requested MTU $optimalMTU but interface reports $applied" -ForegroundColor Yellow
+        }
     }
 
     # 2. Hardware Driver Properties (Vendor-Neutral: Intel, Realtek, Killer, Marvell)
@@ -377,14 +382,28 @@ function Apply-Optimizations {
             Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword $kw -RegistryValue 0 -ErrorAction SilentlyContinue
         }
         # Fallback wildcard matching for proprietary displays
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Green*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Gigabit Lite*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Power Saving*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Energy Efficient*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Flow Control*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
-        Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*Large Send Offload*" -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        $displayPatterns = @("*Green*", "*Gigabit Lite*", "*Power Saving*", "*Energy Efficient*", "*Flow Control*", "*Large Send Offload*")
+        foreach ($pattern in $displayPatterns) {
+            Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName $pattern -DisplayValue "Disabled" -ErrorAction SilentlyContinue
+        }
 
-        Write-Host "  [OK] Tuned NIC power & packet flags on '$($a.Name)'" -ForegroundColor Green
+        # Verify: re-read the driver and report anything still enabled
+        $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue
+        $stillActive = @($props | Where-Object {
+            $p = $_
+            $matchesDisplay = $false
+            foreach ($pattern in $displayPatterns) {
+                if ($p.DisplayName -like $pattern) { $matchesDisplay = $true; break }
+            }
+            ($p.RegistryKeyword -in $vendorKeywords -or $matchesDisplay) -and
+            ($p.DisplayValue -eq "Enabled" -or $p.RegistryValue -contains 1 -or $p.RegistryValue -contains "1")
+        })
+        if ($stillActive.Count -eq 0) {
+            Write-Host "  [OK] '$($a.Name)': latency-related driver flags disabled and verified" -ForegroundColor Green
+        } else {
+            $names = ($stillActive | ForEach-Object { if ($_.DisplayName) { $_.DisplayName } else { $_.RegistryKeyword } } | Select-Object -Unique) -join ", "
+            Write-Host "  [WARN] '$($a.Name)': driver refused to change: $names" -ForegroundColor Yellow
+        }
     }
 
     # 3. Windows Gaming Priority & MMCSS
