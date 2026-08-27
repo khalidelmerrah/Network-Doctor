@@ -15,7 +15,7 @@
 Open **PowerShell** (Auto-prompts for Administrator) and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor-/main/NetDoctor.ps1 | iex
+irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
 ```
 
 *(Or clone this repository and double-click `NetDoctor.bat` on your Desktop).*
