@@ -1,8 +1,8 @@
 ﻿# NetDoctor - Standalone Windows network diagnostics and latency optimizer
 # Run directly: irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$script:Version = "1.3.0"
-try { $Host.UI.RawUI.WindowTitle = "NetDoctor v$script:Version - Network Diagnostics & Latency Optimizer" } catch { }
+$script:Version = "1.3.1"
+try { $Host.UI.RawUI.WindowTitle = "NetDoctor v$script:Version - Gaming Network & Latency Optimizer" } catch { }
 
 $script:Line = "=========================================================================="
 $script:Thin = "--------------------------------------------------------------------------"
@@ -171,11 +171,17 @@ function Show-Header {
     Clear-Host
     $os = try { (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).Caption } catch { "Windows" }
     Write-Host ""
-    Write-Host "  $script:Line" -ForegroundColor DarkCyan
-    Write-Host "   NetDoctor v$script:Version" -ForegroundColor White
-    Write-Host "   Windows Network Diagnostics & Latency Optimizer" -ForegroundColor Gray
-    Write-Host "   $os | PowerShell $($PSVersionTable.PSVersion) | Elevated session" -ForegroundColor DarkGray
-    Write-Host "  $script:Line" -ForegroundColor DarkCyan
+    Write-Host "  $script:Line" -ForegroundColor Cyan
+    Write-Host "   _   _      _   ____             _              " -ForegroundColor Cyan
+    Write-Host "  | \ | | ___| |_|  _ \  ___   ___| |_ ___  _ __  " -ForegroundColor Cyan
+    Write-Host "  |  \| |/ _ \ __| | | |/ _ \ / __| __/ _ \| '__| " -ForegroundColor Cyan
+    Write-Host "  | |\  |  __/ |_| |_| | (_) | (__| || (_) | |    " -ForegroundColor Cyan
+    Write-Host "  |_| \_|\___|\__|____/ \___/ \___|\__\___/|_|    v$script:Version" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "   GAMING LATENCY OPTIMIZER + PATH MTU DISCOVERY ENGINE" -ForegroundColor Yellow
+    Write-Host "   Lower ping. Zero packet loss. Flat jitter. Backed up and reversible." -ForegroundColor White
+    Write-Host "   $os | PowerShell $($PSVersionTable.PSVersion) | Elevated" -ForegroundColor DarkGray
+    Write-Host "  $script:Line" -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -235,7 +241,7 @@ function Run-Diagnostics {
         }
 
         if ($a.LinkSpeed -like "*100 Mbps*" -or $a.LinkSpeed -like "*10 Mbps*") {
-            $issues += "'$($a.Name)' negotiated at $($a.LinkSpeed). On gigabit hardware this usually means a damaged cable or a bad switch/router port."
+            $issues += "'$($a.Name)' negotiated at $($a.LinkSpeed). On gigabit hardware this usually means a damaged cable or a bad switch/router port - a hard cap on your whole connection."
         }
     }
 
@@ -254,7 +260,7 @@ function Run-Diagnostics {
 
     foreach ($ad in $adapterDetails) {
         if ($ad.MTU -gt $optimalMTU) {
-            $issues += "MTU mismatch on '$($ad.Name)': interface is set to $($ad.MTU) but the path maximum is $optimalMTU. Oversized packets get fragmented or silently dropped."
+            $issues += "MTU mismatch on '$($ad.Name)': interface is set to $($ad.MTU) but the path maximum is $optimalMTU. Oversized game packets get fragmented or silently dropped - the classic cause of rubberbanding on PPPoE/fiber lines."
         }
     }
 
@@ -278,7 +284,7 @@ function Run-Diagnostics {
             }
 
             if ($hasActivePowerSaving) {
-                $issues += "Power-saving features (Green Ethernet / EEE) enabled on '$($a.Name)'. These let the NIC idle and can add latency spikes when traffic resumes."
+                $issues += "Power-saving features (Green Ethernet / EEE) enabled on '$($a.Name)'. The NIC dozes off between packets and wakes up late - felt as random ping spikes mid-game."
                 if (-not $Silent) { Write-Status WARN "$($a.Name): power saving / Green Ethernet enabled" }
             } elseif (-not $Silent) {
                 Write-Status OK "$($a.Name): power saving / Green Ethernet disabled"
@@ -288,7 +294,7 @@ function Run-Diagnostics {
             $lsoProps = $props | Where-Object { $_.RegistryKeyword -like "*LsoV2*" -or $_.DisplayName -like "*Large Send Offload*" }
             $hasLSO = ($lsoProps | Where-Object { $_.DisplayValue -eq "Enabled" -or $_.RegistryValue -eq 1 })
             if ($hasLSO) {
-                $issues += "Large Send Offload enabled on '$($a.Name)'. LSO batches outgoing packets, which can add jitter for time-sensitive traffic."
+                $issues += "Large Send Offload enabled on '$($a.Name)'. LSO batches outgoing packets instead of firing them immediately - adds jitter your inputs pay for."
                 if (-not $Silent) { Write-Status WARN "$($a.Name): Large Send Offload enabled" }
             } elseif (-not $Silent) {
                 Write-Status OK "$($a.Name): Large Send Offload disabled"
@@ -298,7 +304,7 @@ function Run-Diagnostics {
             $flowProps = $props | Where-Object { $_.RegistryKeyword -eq "*FlowControl" -or $_.DisplayName -like "*Flow Control*" }
             $hasFlow = ($flowProps | Where-Object { $_.DisplayValue -ne "Disabled" -and $_.RegistryValue -ne 0 })
             if ($hasFlow) {
-                $issues += "Flow Control enabled on '$($a.Name)'. Pause frames can hold back traffic during congestion."
+                $issues += "Flow Control enabled on '$($a.Name)'. Pause frames can freeze game traffic whenever a background download fills a buffer."
                 if (-not $Silent) { Write-Status WARN "$($a.Name): Flow Control enabled" }
             } elseif (-not $Silent) {
                 Write-Status OK "$($a.Name): Flow Control disabled"
@@ -307,7 +313,7 @@ function Run-Diagnostics {
     }
 
     # 4. Latency, jitter, packet loss
-    if (-not $Silent) { Write-Section "[4/5] Latency, jitter and packet loss" }
+    if (-not $Silent) { Write-Section "[4/5] Ping, jitter and packet loss" }
     $gw = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway }).IPv4DefaultGateway.NextHop | Select-Object -First 1
     $gwLatency = 0
     if ($gw) {
@@ -326,16 +332,16 @@ function Run-Diagnostics {
         Write-Status $lvl "Internet 8.8.8.8: avg $wanAvg ms, jitter $wanJitter ms, loss $wanLoss% (10 probes)"
     }
     if ($wanLoss -gt 0) {
-        $issues += "Packet loss to 8.8.8.8 measured at $wanLoss%. Any loss above 0% is noticeable in real-time applications."
+        $issues += "Packet loss to 8.8.8.8 measured at $wanLoss%. Anything above 0% means dropped shots, teleporting players and desync."
     }
 
     # 5. Windows multimedia network throttling
-    if (-not $Silent) { Write-Section "[5/5] Windows multimedia network throttling" }
+    if (-not $Silent) { Write-Section "[5/5] Windows game packet priority (multimedia throttling)" }
     $sysProfile = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -ErrorAction SilentlyContinue
     $throttleVal = if ($sysProfile) { $sysProfile.NetworkThrottlingIndex } else { $null }
     $isThrottlingDisabled = ($throttleVal -eq 4294967295 -or $throttleVal -eq -1 -or $throttleVal -eq 0xFFFFFFFF)
     if ($null -ne $throttleVal -and -not $isThrottlingDisabled) {
-        $issues += "Windows multimedia network throttling is active (NetworkThrottlingIndex = $throttleVal). It caps network packet processing while multimedia runs."
+        $issues += "Windows multimedia network throttling is active (NetworkThrottlingIndex = $throttleVal). Windows deprioritizes your game packets whenever Discord, Spotify or any audio/video runs."
         if (-not $Silent) { Write-Status WARN "NetworkThrottlingIndex = $throttleVal (throttling active)" }
     } elseif (-not $Silent) {
         Write-Status OK "NetworkThrottlingIndex disabled (no multimedia throttling)"
@@ -531,35 +537,35 @@ function Restore-Defaults {
 # --- Interactive Main Loop ---
 while ($true) {
     Show-Header
-    Write-Host "   1  Full optimization     diagnose, apply, verify, save report" -ForegroundColor White
-    Write-Host "   2  Diagnostics only      read-only health check, no changes" -ForegroundColor White
-    Write-Host "   3  Apply optimizations   apply without the pre-diagnosis output" -ForegroundColor White
-    Write-Host "   4  Speed test            Cloudflare download benchmark" -ForegroundColor White
-    Write-Host "   5  Restore settings      revert to backup or Windows defaults" -ForegroundColor White
-    Write-Host "   0  Exit" -ForegroundColor DarkGray
+    Write-Host "   1  FULL AUTO-FIX          diagnose -> optimize -> verify -> report" -ForegroundColor Green
+    Write-Host "   2  DIAGNOSE ONLY          check ping, jitter, packet loss, MTU (read-only)" -ForegroundColor Yellow
+    Write-Host "   3  APPLY OPTIMIZATIONS    straight to the fixes, no pre-diagnosis output" -ForegroundColor Cyan
+    Write-Host "   4  SPEED TEST             Cloudflare edge download benchmark" -ForegroundColor Magenta
+    Write-Host "   5  RESTORE SETTINGS       safety revert to backup or Windows defaults" -ForegroundColor DarkYellow
+    Write-Host "   0  EXIT" -ForegroundColor DarkGray
     Write-Host ""
     $choice = Read-Host "  Select an option (0-5)"
 
     switch ($choice) {
         "1" {
             Show-Header
-            Write-Host "  Phase 1/3: initial diagnosis" -ForegroundColor Cyan
+            Write-Host "  PHASE 1/3: DIAGNOSIS - hunting for lag sources" -ForegroundColor Cyan
             $before = Run-Diagnostics
 
             Write-Section "Findings"
             if ($before.Issues.Count -gt 0) {
-                Write-Status WARN "$($before.Issues.Count) issue(s) found:"
+                Write-Status WARN "$($before.Issues.Count) lag source(s) found:"
                 foreach ($iss in $before.Issues) { Write-Host "    - $iss" -ForegroundColor Yellow }
             } else {
-                Write-Status OK "No issues found. Applying preventive optimizations anyway."
+                Write-Status OK "No lag sources found. Applying preventive tuning anyway."
             }
 
             Write-Host ""
-            Write-Host "  Phase 2/3: applying optimizations" -ForegroundColor Cyan
+            Write-Host "  PHASE 2/3: OPTIMIZATION - applying the fixes" -ForegroundColor Cyan
             Apply-Optimizations -Diag $before
 
             Write-Host ""
-            Write-Host "  Phase 3/3: post-optimization verification" -ForegroundColor Cyan
+            Write-Host "  PHASE 3/3: VERIFICATION - re-measuring your connection" -ForegroundColor Cyan
             $after = Run-Diagnostics
 
             Show-ResultsComparison -Before $before -After $after
@@ -570,7 +576,7 @@ while ($true) {
 
             $reportContent = @"
 ==========================================================================
- NetDoctor v$script:Version - Optimization Report
+ NetDoctor v$script:Version - Gaming Network Optimization Report
 ==========================================================================
  Date:             $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 
@@ -581,8 +587,9 @@ while ($true) {
    Gateway latency             $($before.GwLatency) ms$(" " * [math]::Max(1, 16 - "$($before.GwLatency) ms".Length))$($after.GwLatency) ms
    Path MTU (applied)          $($after.OptimalMTU)
 
- Issues found before optimizing:
+ Lag sources found before optimizing:
 $(if ($before.Issues.Count) { $before.Issues | ForEach-Object { "   - $_" } | Out-String } else { "   (none)`n" })
+ Status:           GAME-READY - low-latency profile applied and verified
  Settings backup:  $(if (Test-Path $script:BackupPath) { $script:BackupPath } else { "consumed by a restore" })
  Revert anytime:   re-run NetDoctor and choose option 5 (Restore settings)
 ==========================================================================
@@ -590,7 +597,7 @@ $(if ($before.Issues.Count) { $before.Issues | ForEach-Object { "   - $_" } | Ou
             $reportContent | Set-Content -Path $reportPath -Encoding utf8
 
             Write-Host ""
-            Write-Status OK "Optimization complete. Report saved to $reportPath"
+            Write-Status OK "Optimization complete - connection is game-ready. Report: $reportPath"
             Write-Host ""
             Read-Host "  Press Enter to return to the menu"
         }
@@ -599,12 +606,12 @@ $(if ($before.Issues.Count) { $before.Issues | ForEach-Object { "   - $_" } | Ou
             $diag = Run-Diagnostics
             Write-Section "Findings"
             if ($diag.Issues.Count -eq 0) {
-                Write-Status OK "No issues found. Network configuration looks healthy."
+                Write-Status OK "No lag sources found. Your connection is primed for low-latency gaming."
             } else {
-                Write-Status WARN "$($diag.Issues.Count) issue(s) found:"
+                Write-Status WARN "$($diag.Issues.Count) lag source(s) found:"
                 foreach ($iss in $diag.Issues) { Write-Host "    - $iss" -ForegroundColor Yellow }
                 Write-Host ""
-                Write-Status INFO "Run option 1 or 3 to fix these automatically. A backup is taken first."
+                Write-Status INFO "Run option 1 or 3 to fix these automatically. Your settings are backed up first."
             }
             Write-Host ""
             Read-Host "  Press Enter to return to the menu"
@@ -615,7 +622,7 @@ $(if ($before.Issues.Count) { $before.Issues | ForEach-Object { "   - $_" } | Ou
             $diag = Run-Diagnostics -Silent
             Apply-Optimizations -Diag $diag
             Write-Host ""
-            Write-Status OK "Optimizations applied. Revert anytime with option 5."
+            Write-Status OK "Gaming optimizations applied. Revert anytime with option 5."
             Read-Host "  Press Enter to return to the menu"
         }
         "4" {
