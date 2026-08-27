@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.3.0] - 2026-08-27 (commit: pending)
+## [1.3.0] - 2026-08-27 (commit: 92a0a6e)
 ### Added
 - Settings backup: the first optimization run snapshots per-adapter MTU, all NIC advanced properties and the multimedia registry values to `%ProgramData%\NetDoctor\settings-backup.json`
 - Restore (option 5) replays that exact snapshot; without a backup it resets NIC properties to driver defaults and applies stock Windows values
