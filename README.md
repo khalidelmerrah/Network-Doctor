@@ -1,95 +1,73 @@
-# 🩺 Network-Doctor (For Competitive Gamers)
+# NetDoctor
 
-> **One-Click Windows Network Diagnostic, Path MTU Discovery & Gaming Latency Optimizer.**  
-> Built for competitive multiplayer gaming: **Valorant, CS2, Fortnite, Warzone, Apex Legends, Rocket League, League of Legends, EA FC / FIFA**.  
-> Zero installation. Zero external tools. 100% native PowerShell.
+**Windows network diagnostics and latency optimizer.** A single, dependency-free PowerShell script that finds and fixes the configuration issues that cause packet loss, jitter and latency spikes - fragmented MTU, NIC power-saving features, packet batching offloads and Windows multimedia throttling.
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](https://github.com/khalidelmerrah/Network-Doctor-)
+Built with low-latency use cases in mind (competitive gaming, real-time audio/video, remote desktop), but the checks and fixes apply to any Windows machine.
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](https://github.com/khalidelmerrah/Network-Doctor)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com/khalidelmerrah/Network-Doctor)
+[![Version](https://img.shields.io/badge/Version-1.3.0-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207%2B-5391FE?logo=powershell)](https://github.com/khalidelmerrah/Network-Doctor-)
 
----
+## Quick start
 
-## ⚡ Instant 1-Line Run (No Download Required)
-
-Open **PowerShell** (Auto-prompts for Administrator) and run:
+Run directly from PowerShell (opened as Administrator), no download needed:
 
 ```powershell
 irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
 ```
 
-*(Or clone this repository and double-click `NetDoctor.bat` on your Desktop).*
+Or clone the repository and double-click `NetDoctor.bat` - it requests Administrator elevation automatically.
 
----
+## What it checks
 
-## 📊 Real Before vs. After Benchmark (Live Test Proof)
+| Check | What it looks for |
+| :--- | :--- |
+| **Link speed** | Gigabit adapters negotiated down to 100/10 Mbps (damaged cable, bad port) |
+| **Path MTU** | Binary-searches the largest unfragmented packet size to your ISP. On PPPoE lines the standard MTU 1500 exceeds the path maximum, so full-size packets fragment or get dropped |
+| **NIC driver flags** | Green Ethernet, Energy-Efficient Ethernet, power-down features, Large Send Offload and Flow Control - across Intel, Realtek, Killer, Marvell and Aquantia drivers |
+| **Latency and loss** | Gateway and internet round-trip time, jitter (standard deviation) and packet loss, measured with locale-independent .NET ICMP probes |
+| **Windows throttling** | `NetworkThrottlingIndex` multimedia throttling that caps packet processing while audio/video plays |
 
-Here are the actual results from a real gaming fiber connection before and after running **Network-Doctor**:
+## What it changes (option 1 or 3)
 
-| Metric | Before Network-Doctor 🔴 | After Network-Doctor 🟢 | Gamer Impact |
-| :--- | :--- | :--- | :--- |
-| **Small Payload Latency (100kB Upload)** | **`336.5 ms`** | **`30.3 ms`** | **11x faster hit-registration** & zero click delay |
-| **Medium Payload Latency (1MB Upload)** | **`220.0 ms`** | **`30.4 ms`** | Smooth voice chat & instant player positioning |
-| **Upload Speed Throughput** | **`3.5 - 6.0 Mbps`** *(Choked)* | **`95.5 Mbps`** *(Full Line)* | No more bottleneck when uploading clips/Discord streams |
-| **Packet Loss & Drops** | **`5.1% - 75.0%`** | **`0.0%`** | Eliminates rubberbanding, teleporting & dropped bullets |
-| **Ping Jitter** | **`152.0 ms`** | **`1.0 - 8.0 ms`** | Perfectly steady, flat frame-time ping |
+All changes are recorded in a backup **before** anything is modified:
 
----
+- Sets each physical adapter's IPv4 MTU to the measured path maximum
+- Disables NIC power-saving and packet-batching driver features (verified after applying - the tool reports anything the driver refused)
+- Disables `NetworkThrottlingIndex` and sets `SystemResponsiveness` to 0
+- Sets TCP autotuning to normal, enables RSS and TCP Fast Open, flushes the DNS cache
 
-## 🎮 What Network-Doctor Fixes for Gamers
+## Backup and restore
 
-1. **🔴 Eliminates In-Game Packet Loss (Path MTU Discovery):**
-   * If your ISP or Fiber connection uses **PPPoE**, standard `1500 MTU` drops up to **75%** of unfragmented gaming packets.
-   * Network-Doctor sweeps packet boundaries (`1472` $\to$ `1464` $\to$ `1372`) and locks the exact optimal MTU (`1492`).
+The first optimization run snapshots your original settings (per-adapter MTU, all NIC advanced properties, registry values) to `%ProgramData%\NetDoctor\settings-backup.json`.
 
-2. **🔴 Removes Hardware Driver Micro-Stutters (Multi-Vendor NIC Tuning):**
-   * Universal vendor support for **Intel, Realtek, Killer, Marvell, and Aquantia** controllers.
-   * Disables **Green Ethernet**, **Energy Efficient Ethernet (EEE)**, `ReduceSpeedOnPowerDown`, and `PowerDownPcie` which put the NIC to sleep and spike latency.
-   * Disables **Large Send Offload (LSO)** which delays and batches UDP game packets into chunks instead of dispatching them immediately.
-   * Disables **Flow Control** which temporarily pauses game traffic whenever a background buffer fills.
+**Option 5 restores that exact snapshot** - not generic defaults. If no backup exists, it falls back to stock Windows defaults and resets NIC properties to driver defaults. Virtual and VPN interfaces are never touched.
 
-3. **🔴 Grants Maximum Windows Gaming Priority:**
-   * Removes Windows Multimedia Network Throttling (`NetworkThrottlingIndex`) that throttles game packets when Discord audio or background music is playing.
-   * Sets `SystemResponsiveness` to `0` for 100% CPU/Network gaming priority.
-
-4. **🔄 Revert / Safety Net Functionality:**
-   * Option `[5]` allows users to safely restore all stock Windows defaults (MTU 1500, default TCP stack, MMCSS throttling) with a single click.
-
----
-
-## 🌐 Cloudflare Speed Test Integration
-
-**Network-Doctor** comes with native Cloudflare speed benchmark integration:
-* **Option 1 (Built-in):** Option `[4]` runs a live throughput & latency benchmark directly in PowerShell against Cloudflare's nearest edge server.
-* **Option 2 (Visual Browser Audit):** Prompts you to launch [speed.cloudflare.com](https://speed.cloudflare.com/) in your browser to inspect real-time jitter, packet loss, and bufferbloat graphs.
-
----
-
-## 🖥️ Interactive Dashboard Preview
+## Menu
 
 ```text
 ==========================================================================
-  _   _      _   ____             _                                       
- | \ | | ___| |_|  _ \  ___   ___| |_ ___  _ __                           
- |  \| |/ _ \ __| | | |/ _ \ / __| __/ _ \| '__|                          
- | |\  |  __/ |_| |_| | (_) | (__| || (_) | |                             
- |_| \_|\___|\__|____/ \___/ \___|\__\___/|_|                             
-                                                                          
-    🎮 ULTIMATE GAMING LATENCY OPTIMIZER & PATH MTU DISCOVERY ENGINE      
-    Zero Lag • 0% Packet Loss • Lowest Ping • No Input Queue Delay        
+ NetDoctor v1.3.0
+ Windows Network Diagnostics & Latency Optimizer
 ==========================================================================
 
-  [1] 🚀 FULL AUTO-FIX FOR GAMERS (Diagnose -> Optimize -> Verify)
-  [2] 🔍 DIAGNOSE ONLY (Check Packet Loss, Jitter & MTU Boundary)
-  [3] ⚡ APPLY GAMING OPTIMIZATIONS ONLY
-  [4] 🌐 CLOUDFLARE SPEED & LOADED LATENCY TEST
-  [5] 🔄 RESTORE WINDOWS DEFAULT SETTINGS (Safety Revert)
-  [0] ❌ EXIT
-
-Select an option (0-5):
+  1  Full optimization     diagnose, apply, verify, save report
+  2  Diagnostics only      read-only health check, no changes
+  3  Apply optimizations   apply without the pre-diagnosis output
+  4  Speed test            Cloudflare download benchmark
+  5  Restore settings      revert to backup or Windows defaults
+  0  Exit
 ```
 
----
+Option 1 finishes with a before/after comparison and writes a full report (`NetDoctor_Report.txt`) next to the script, or to the Desktop when run via `irm | iex`.
 
-## 📜 License
-MIT License. Free for all gamers and developers to use, share, and improve.
+## Requirements
+
+- Windows 10 or 11
+- PowerShell 5.1 (built in) or PowerShell 7+
+- Administrator rights (the script checks and explains if missing)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
