@@ -162,18 +162,22 @@ function Run-CloudflareTest {
     Write-Host ">>> RUNNING NATIVE CLOUDFLARE SPEED & LATENCY BENCHMARK..." -ForegroundColor Cyan
     Write-Host "Connecting to nearest Cloudflare Edge Server..." -ForegroundColor Gray
     
-    $downMbps = 0
+    $client = $null
     try {
+        Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromSeconds(30)
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $wc = New-Object System.Net.WebClient
-        $data = $wc.DownloadData("https://speed.cloudflare.com/__down?bytes=10000000")
+        $data = $client.GetByteArrayAsync("https://speed.cloudflare.com/__down?bytes=10000000").GetAwaiter().GetResult()
         $sw.Stop()
         if ($sw.ElapsedMilliseconds -gt 0) {
             $downMbps = [math]::Round(($data.Length * 8 / 1000000) / ($sw.ElapsedMilliseconds / 1000), 2)
-            Write-Host "  • Cloudflare Download Speed: $downMbps Mbps (10MB in $($sw.ElapsedMilliseconds) ms)" -ForegroundColor Green
+            Write-Host "  Download: $downMbps Mbps ($([math]::Round($data.Length / 1MB, 1)) MB in $($sw.ElapsedMilliseconds) ms)" -ForegroundColor Green
         }
     } catch {
-        Write-Host "  • Native Cloudflare Test: Network busy or timed out." -ForegroundColor Yellow
+        Write-Host "  Download test failed or timed out after 30 s." -ForegroundColor Yellow
+    } finally {
+        if ($client) { $client.Dispose() }
     }
 
     Write-Host ""
