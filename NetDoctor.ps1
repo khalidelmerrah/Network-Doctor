@@ -187,7 +187,8 @@ function Run-Diagnostics {
     }
     $sysProfile = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -ErrorAction SilentlyContinue
     $throttleVal = if ($sysProfile) { $sysProfile.NetworkThrottlingIndex } else { $null }
-    if ($null -ne $throttleVal -and $throttleVal -ne -1 -and $throttleVal -ne [int]0xFFFFFFFF) {
+    $isThrottlingDisabled = ($throttleVal -eq 4294967295 -or $throttleVal -eq -1 -or $throttleVal -eq 0xFFFFFFFF)
+    if ($null -ne $throttleVal -and -not $isThrottlingDisabled) {
         $issues += "Windows Multimedia Network Throttling is ACTIVE (Limits game packet priority)"
         if (-not $Silent) { Write-Host "    [!] NetworkThrottlingIndex: Active (Throttles gaming packets)" -ForegroundColor Yellow }
     } else {
