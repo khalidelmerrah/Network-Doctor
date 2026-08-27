@@ -1,4 +1,4 @@
-# NetDoctor - Standalone Windows Network Optimizer & Diagnostics Tool for Gamers
+﻿# NetDoctor - Standalone Windows Network Optimizer & Diagnostics Tool for Gamers
 # Run directly via PowerShell: irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Host.UI.RawUI.WindowTitle = "NetDoctor v1.2 - Ultimate Gaming Network & Latency Optimizer"
