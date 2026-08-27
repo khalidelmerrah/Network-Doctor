@@ -1,25 +1,49 @@
-﻿# NetDoctor - Standalone Windows Network Optimizer & Diagnostics Tool for Gamers
-# Run directly via PowerShell: irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
+﻿# NetDoctor - Standalone Windows network diagnostics and latency optimizer
+# Run directly: irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$Host.UI.RawUI.WindowTitle = "NetDoctor v1.2 - Ultimate Gaming Network & Latency Optimizer"
+$script:Version = "1.3.0"
+try { $Host.UI.RawUI.WindowTitle = "NetDoctor v$script:Version - Network Diagnostics & Latency Optimizer" } catch { }
+
+$script:Line = "=========================================================================="
+$script:Thin = "--------------------------------------------------------------------------"
+
+# --- Output Helpers ---
+function Write-Status {
+    param(
+        [ValidateSet("OK", "WARN", "FAIL", "INFO")] [string]$Level,
+        [string]$Message
+    )
+    $ts = Get-Date -Format "HH:mm:ss"
+    $tag, $color = switch ($Level) {
+        "OK"   { " OK ", "Green" }
+        "WARN" { "WARN", "Yellow" }
+        "FAIL" { "FAIL", "Red" }
+        "INFO" { "INFO", "Gray" }
+    }
+    Write-Host "  $ts  [$tag]  $Message" -ForegroundColor $color
+}
+
+function Write-Section {
+    param([string]$Title)
+    Write-Host ""
+    Write-Host "  $Title" -ForegroundColor Cyan
+    Write-Host "  $script:Thin" -ForegroundColor DarkGray
+}
 
 # --- 1. Check Administrator Privileges ---
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Clear-Host
-    Write-Host "==========================================================================" -ForegroundColor Red
-    Write-Host "                ⚠️  ADMINISTRATOR PRIVILEGES REQUIRED  ⚠️                 " -ForegroundColor Yellow
-    Write-Host "==========================================================================" -ForegroundColor Red
+    Write-Host $script:Line -ForegroundColor Yellow
+    Write-Host " NetDoctor v$script:Version - Administrator privileges required" -ForegroundColor White
+    Write-Host $script:Line -ForegroundColor Yellow
     Write-Host ""
-    Write-Host " NetDoctor needs Administrator rights to discover optimal MTU and tune " -ForegroundColor White
-    Write-Host " your network adapter's latency settings." -ForegroundColor White
+    Write-Host " NetDoctor changes network adapter and registry settings, which requires" -ForegroundColor Gray
+    Write-Host " an elevated session. Open PowerShell as Administrator and run:" -ForegroundColor Gray
     Write-Host ""
-    Write-Host " 👉 Please open PowerShell as Administrator and re-run:" -ForegroundColor Cyan
-    Write-Host "    irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex" -ForegroundColor Green
+    Write-Host "   irm https://raw.githubusercontent.com/khalidelmerrah/Network-Doctor/main/NetDoctor.ps1 | iex" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "==========================================================================" -ForegroundColor Red
-    Write-Host ""
-    Read-Host "Press Enter to exit..."
+    Read-Host " Press Enter to exit"
     exit
 }
 
@@ -145,23 +169,20 @@ function Save-SettingsBackup {
 
 function Show-Header {
     Clear-Host
-    Write-Host "==========================================================================" -ForegroundColor Cyan
-    Write-Host "  _   _      _   ____             _                                       " -ForegroundColor Cyan
-    Write-Host " | \ | | ___| |_|  _ \  ___   ___| |_ ___  _ __                           " -ForegroundColor Cyan
-    Write-Host " |  \| |/ _ \ __| | | |/ _ \ / __| __/ _ \| '__|                          " -ForegroundColor Cyan
-    Write-Host " | |\  |  __/ |_| |_| | (_) | (__| || (_) | |                             " -ForegroundColor Cyan
-    Write-Host " |_| \_|\___|\__|____/ \___/ \___|\__\___/|_|                             " -ForegroundColor Cyan
-    Write-Host "                                                                          " -ForegroundColor Cyan
-    Write-Host "    🎮 ULTIMATE GAMING LATENCY OPTIMIZER & PATH MTU DISCOVERY ENGINE      " -ForegroundColor Yellow
-    Write-Host "    Zero Lag • 0% Packet Loss • Lowest Ping • No Input Queue Delay        " -ForegroundColor White
-    Write-Host "==========================================================================" -ForegroundColor Cyan
+    $os = try { (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).Caption } catch { "Windows" }
+    Write-Host ""
+    Write-Host "  $script:Line" -ForegroundColor DarkCyan
+    Write-Host "   NetDoctor v$script:Version" -ForegroundColor White
+    Write-Host "   Windows Network Diagnostics & Latency Optimizer" -ForegroundColor Gray
+    Write-Host "   $os | PowerShell $($PSVersionTable.PSVersion) | Elevated session" -ForegroundColor DarkGray
+    Write-Host "  $script:Line" -ForegroundColor DarkCyan
     Write-Host ""
 }
 
 function Run-CloudflareTest {
-    Write-Host ">>> RUNNING NATIVE CLOUDFLARE SPEED & LATENCY BENCHMARK..." -ForegroundColor Cyan
-    Write-Host "Connecting to nearest Cloudflare Edge Server..." -ForegroundColor Gray
-    
+    Write-Section "Throughput benchmark (Cloudflare edge)"
+    Write-Status INFO "Downloading 10 MB from speed.cloudflare.com..."
+
     $client = $null
     try {
         Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
@@ -172,16 +193,16 @@ function Run-CloudflareTest {
         $sw.Stop()
         if ($sw.ElapsedMilliseconds -gt 0) {
             $downMbps = [math]::Round(($data.Length * 8 / 1000000) / ($sw.ElapsedMilliseconds / 1000), 2)
-            Write-Host "  Download: $downMbps Mbps ($([math]::Round($data.Length / 1MB, 1)) MB in $($sw.ElapsedMilliseconds) ms)" -ForegroundColor Green
+            Write-Status OK "Download: $downMbps Mbps ($([math]::Round($data.Length / 1MB, 1)) MB in $($sw.ElapsedMilliseconds) ms)"
         }
     } catch {
-        Write-Host "  Download test failed or timed out after 30 s." -ForegroundColor Yellow
+        Write-Status WARN "Download test failed or timed out after 30 s."
     } finally {
         if ($client) { $client.Dispose() }
     }
 
     Write-Host ""
-    $openBrowser = Read-Host "Would you like to open https://speed.cloudflare.com/ in your browser for a full visual benchmark? (Y/N)"
+    $openBrowser = Read-Host "  Open speed.cloudflare.com in your browser for a full benchmark (latency under load, jitter)? (Y/N)"
     if ($openBrowser -eq "Y" -or $openBrowser -eq "y") {
         Start-Process "https://speed.cloudflare.com/"
     }
@@ -190,10 +211,8 @@ function Run-CloudflareTest {
 function Run-Diagnostics {
     param([switch]$Silent)
 
-    if (-not $Silent) {
-        Write-Host "--- [1/5] SCANNING NETWORK HARDWARE & LINK SPEED ---" -ForegroundColor Yellow
-    }
-    
+    if (-not $Silent) { Write-Section "[1/5] Network adapters" }
+
     $adapters = Get-PhysicalAdapters
 
     $issues = @()
@@ -202,7 +221,7 @@ function Run-Diagnostics {
     foreach ($a in $adapters) {
         $ipConf = Get-NetIPInterface -InterfaceAlias $a.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue
         $mtu = if ($ipConf) { $ipConf.NlMtu } else { 1500 }
-        
+
         $adapterDetails += [PSCustomObject]@{
             Name = $a.Name
             Description = $a.InterfaceDescription
@@ -211,47 +230,41 @@ function Run-Diagnostics {
         }
 
         if (-not $Silent) {
-            Write-Host "  • Adapter: $($a.Name) ($($a.InterfaceDescription))" -ForegroundColor White
-            Write-Host "    Link Speed: $($a.LinkSpeed) | Current IPv4 MTU: $mtu" -ForegroundColor Gray
+            Write-Status INFO "$($a.Name): $($a.InterfaceDescription)"
+            Write-Status INFO "  link $($a.LinkSpeed) | IPv4 MTU $mtu"
         }
 
         if ($a.LinkSpeed -like "*100 Mbps*" -or $a.LinkSpeed -like "*10 Mbps*") {
-            $issues += "Ethernet link speed is negotiated at $($a.LinkSpeed) (Damaged cable or bad LAN port)."
+            $issues += "'$($a.Name)' negotiated at $($a.LinkSpeed). On gigabit hardware this usually means a damaged cable or a bad switch/router port."
         }
     }
 
-    # 2. Path MTU Discovery Sweep
-    if (-not $Silent) {
-        Write-Host ""
-        Write-Host "--- [2/5] RUNNING PATH MTU DISCOVERY (PACKET FRAGMENTATION CHECK) ---" -ForegroundColor Yellow
-    }
+    # 2. Path MTU discovery
+    if (-not $Silent) { Write-Section "[2/5] Path MTU discovery" }
     $target = "8.8.8.8"
     $optimalPayload = Find-OptimalPayload -Target $target
     $optimalMTU = if ($optimalPayload -gt 0) { $optimalPayload + 28 } else { 1492 }
     if (-not $Silent) {
         if ($optimalPayload -gt 0) {
-            Write-Host "    Largest unfragmented payload: $optimalPayload B (+28 B header = MTU $optimalMTU)" -ForegroundColor Green
+            Write-Status OK "Largest unfragmented payload: $optimalPayload bytes (+28 header = path MTU $optimalMTU)"
         } else {
-            Write-Host "    MTU sweep inconclusive (no unfragmented replies). Assuming PPPoE-safe MTU 1492." -ForegroundColor Yellow
+            Write-Status WARN "Sweep inconclusive (no unfragmented replies). Assuming PPPoE-safe MTU 1492."
         }
     }
 
     foreach ($ad in $adapterDetails) {
         if ($ad.MTU -gt $optimalMTU) {
-            $issues += "MTU Mismatch on '$($ad.Name)' (Current: $($ad.MTU) vs Optimal: $optimalMTU). Causes 5-75% gaming packet loss!"
+            $issues += "MTU mismatch on '$($ad.Name)': interface is set to $($ad.MTU) but the path maximum is $optimalMTU. Oversized packets get fragmented or silently dropped."
         }
     }
 
-    # 3. Multi-Vendor NIC Driver Latency Settings (Intel, Realtek, Killer, Marvell)
-    if (-not $Silent) {
-        Write-Host ""
-        Write-Host "--- [3/5] CHECKING HARDWARE LATENCY DRIVER FLAGS (INTEL / REALTEK / KILLER) ---" -ForegroundColor Yellow
-    }
+    # 3. NIC driver latency settings (vendor-neutral)
+    if (-not $Silent) { Write-Section "[3/5] NIC driver settings (Intel / Realtek / Killer / Marvell)" }
     foreach ($a in $adapters) {
         $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue
         if ($props) {
-            # Check Green & Power Savings across all vendors
-            $powerSavingProps = $props | Where-Object { 
+            # Power saving / Green Ethernet / EEE across vendors
+            $powerSavingProps = $props | Where-Object {
                 $_.RegistryKeyword -in @("EnableGreenEthernet", "GigaLite", "PowerSavingMode", "AdvancedEEE", "EEELinkAdvertisement", "*EnergyEfficientEthernet", "*ReduceSpeedOnPowerDown", "*PowerDownPcie", "*ModernStandby") -or
                 $_.DisplayName -like "*Green*" -or $_.DisplayName -like "*Energy Efficient*" -or $_.DisplayName -like "*Gigabit Lite*" -or $_.DisplayName -like "*Power Saving*"
             }
@@ -265,70 +278,67 @@ function Run-Diagnostics {
             }
 
             if ($hasActivePowerSaving) {
-                $issues += "Hardware Power Throttling / Green Ethernet is ENABLED on '$($a.Name)'"
-                if (-not $Silent) { Write-Host "    [!] Power Throttling / Green Ethernet: Enabled on $($a.Name)" -ForegroundColor Yellow }
-            } else {
-                if (-not $Silent) { Write-Host "    [OK] Hardware Power Throttling / Green Ethernet: Disabled" -ForegroundColor Green }
+                $issues += "Power-saving features (Green Ethernet / EEE) enabled on '$($a.Name)'. These let the NIC idle and can add latency spikes when traffic resumes."
+                if (-not $Silent) { Write-Status WARN "$($a.Name): power saving / Green Ethernet enabled" }
+            } elseif (-not $Silent) {
+                Write-Status OK "$($a.Name): power saving / Green Ethernet disabled"
             }
 
-            # Check LSO (Large Send Offload)
+            # Large Send Offload
             $lsoProps = $props | Where-Object { $_.RegistryKeyword -like "*LsoV2*" -or $_.DisplayName -like "*Large Send Offload*" }
             $hasLSO = ($lsoProps | Where-Object { $_.DisplayValue -eq "Enabled" -or $_.RegistryValue -eq 1 })
             if ($hasLSO) {
-                $issues += "Large Send Offload (LSO) is ENABLED on '$($a.Name)' (Causes packet batching jitter)"
-                if (-not $Silent) { Write-Host "    [!] Large Send Offload: Enabled (Packet batching jitter)" -ForegroundColor Yellow }
-            } else {
-                if (-not $Silent) { Write-Host "    [OK] Large Send Offload: Disabled" -ForegroundColor Green }
+                $issues += "Large Send Offload enabled on '$($a.Name)'. LSO batches outgoing packets, which can add jitter for time-sensitive traffic."
+                if (-not $Silent) { Write-Status WARN "$($a.Name): Large Send Offload enabled" }
+            } elseif (-not $Silent) {
+                Write-Status OK "$($a.Name): Large Send Offload disabled"
             }
 
-            # Check Flow Control
+            # Flow Control
             $flowProps = $props | Where-Object { $_.RegistryKeyword -eq "*FlowControl" -or $_.DisplayName -like "*Flow Control*" }
             $hasFlow = ($flowProps | Where-Object { $_.DisplayValue -ne "Disabled" -and $_.RegistryValue -ne 0 })
             if ($hasFlow) {
-                $issues += "Flow Control is ENABLED on '$($a.Name)' (Can pause UDP game packets)"
-                if (-not $Silent) { Write-Host "    [!] Flow Control: Enabled (Pauses game packets on traffic spikes)" -ForegroundColor Yellow }
-            } else {
-                if (-not $Silent) { Write-Host "    [OK] Flow Control: Disabled" -ForegroundColor Green }
+                $issues += "Flow Control enabled on '$($a.Name)'. Pause frames can hold back traffic during congestion."
+                if (-not $Silent) { Write-Status WARN "$($a.Name): Flow Control enabled" }
+            } elseif (-not $Silent) {
+                Write-Status OK "$($a.Name): Flow Control disabled"
             }
         }
     }
 
-    # 4. Latency & Jitter Ping Test
-    if (-not $Silent) {
-        Write-Host ""
-        Write-Host "--- [4/5] MEASURING IN-GAME PING, JITTER & PACKET LOSS ---" -ForegroundColor Yellow
-    }
+    # 4. Latency, jitter, packet loss
+    if (-not $Silent) { Write-Section "[4/5] Latency, jitter and packet loss" }
     $gw = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway }).IPv4DefaultGateway.NextHop | Select-Object -First 1
     $gwLatency = 0
     if ($gw) {
         $gwStats = Get-PingStats -Target $gw -Count 5
         $gwLatency = $gwStats.Avg
         if (-not $Silent) {
-            $gwColor = if ($gwStats.LossPct -eq 0) { "Green" } else { "Yellow" }
-            Write-Host "    Gateway ($gw): avg $($gwStats.Avg) ms | jitter $($gwStats.Jitter) ms | loss $($gwStats.LossPct)%" -ForegroundColor $gwColor
+            $lvl = if ($gwStats.LossPct -eq 0) { "OK" } else { "WARN" }
+            Write-Status $lvl "Gateway $gw`: avg $($gwStats.Avg) ms, jitter $($gwStats.Jitter) ms, loss $($gwStats.LossPct)% (5 probes)"
         }
     }
 
     $wanStats = Get-PingStats -Target "8.8.8.8" -Count 10
     $wanAvg = $wanStats.Avg; $wanJitter = $wanStats.Jitter; $wanLoss = $wanStats.LossPct
     if (-not $Silent) {
-        $wanColor = if ($wanLoss -eq 0) { "Green" } else { "Red" }
-        Write-Host "    Internet (8.8.8.8): avg $wanAvg ms | jitter $wanJitter ms | loss $wanLoss%" -ForegroundColor $wanColor
+        $lvl = if ($wanLoss -eq 0) { "OK" } else { "FAIL" }
+        Write-Status $lvl "Internet 8.8.8.8: avg $wanAvg ms, jitter $wanJitter ms, loss $wanLoss% (10 probes)"
+    }
+    if ($wanLoss -gt 0) {
+        $issues += "Packet loss to 8.8.8.8 measured at $wanLoss%. Any loss above 0% is noticeable in real-time applications."
     }
 
-    # 5. Windows Gaming Multimedia Settings
-    if (-not $Silent) {
-        Write-Host ""
-        Write-Host "--- [5/5] WINDOWS MULTIMEDIA NETWORK THROTTLING FOR GAMES ---" -ForegroundColor Yellow
-    }
+    # 5. Windows multimedia network throttling
+    if (-not $Silent) { Write-Section "[5/5] Windows multimedia network throttling" }
     $sysProfile = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -ErrorAction SilentlyContinue
     $throttleVal = if ($sysProfile) { $sysProfile.NetworkThrottlingIndex } else { $null }
     $isThrottlingDisabled = ($throttleVal -eq 4294967295 -or $throttleVal -eq -1 -or $throttleVal -eq 0xFFFFFFFF)
     if ($null -ne $throttleVal -and -not $isThrottlingDisabled) {
-        $issues += "Windows Multimedia Network Throttling is ACTIVE (Limits game packet priority)"
-        if (-not $Silent) { Write-Host "    [!] NetworkThrottlingIndex: Active (Throttles gaming packets)" -ForegroundColor Yellow }
-    } else {
-        if (-not $Silent) { Write-Host "    [OK] NetworkThrottlingIndex: Disabled (100% Gaming Priority)" -ForegroundColor Green }
+        $issues += "Windows multimedia network throttling is active (NetworkThrottlingIndex = $throttleVal). It caps network packet processing while multimedia runs."
+        if (-not $Silent) { Write-Status WARN "NetworkThrottlingIndex = $throttleVal (throttling active)" }
+    } elseif (-not $Silent) {
+        Write-Status OK "NetworkThrottlingIndex disabled (no multimedia throttling)"
     }
 
     return @{
@@ -345,36 +355,30 @@ function Run-Diagnostics {
 function Apply-Optimizations {
     param($Diag)
 
-    Write-Host ""
-    Write-Host "==========================================================================" -ForegroundColor Cyan
-    Write-Host "                     APPLYING GAMING OPTIMIZATIONS                        " -ForegroundColor Cyan
-    Write-Host "==========================================================================" -ForegroundColor Cyan
-    Write-Host ""
+    Write-Section "Applying optimizations"
 
     $optimalMTU = $Diag.OptimalMTU
     $adapters = $Diag.Adapters
 
     # 0. Backup current state (first run only)
     if (Save-SettingsBackup -Adapters $adapters) {
-        Write-Host "[0/4] Saved original settings backup to $script:BackupPath" -ForegroundColor Gray
+        Write-Status INFO "Original settings backed up to $script:BackupPath"
     } else {
-        Write-Host "[0/4] Original settings backup already exists ($script:BackupPath) - keeping it" -ForegroundColor Gray
+        Write-Status INFO "Keeping existing backup at $script:BackupPath"
     }
 
     # 1. Set MTU
-    Write-Host "[1/4] Setting Optimal MTU ($optimalMTU) on Network Interfaces..." -ForegroundColor Yellow
     foreach ($a in $adapters) {
         netsh interface ipv4 set subinterface "$($a.Name)" mtu=$optimalMTU store=persistent | Out-Null
         $applied = (Get-NetIPInterface -InterfaceAlias $a.Name -AddressFamily IPv4 -ErrorAction SilentlyContinue).NlMtu
         if ($applied -eq $optimalMTU) {
-            Write-Host "  [OK] '$($a.Name)': MTU set and verified at $optimalMTU" -ForegroundColor Green
+            Write-Status OK "$($a.Name): MTU set and verified at $optimalMTU"
         } else {
-            Write-Host "  [WARN] '$($a.Name)': requested MTU $optimalMTU but interface reports $applied" -ForegroundColor Yellow
+            Write-Status WARN "$($a.Name): requested MTU $optimalMTU but interface reports $applied"
         }
     }
 
-    # 2. Hardware Driver Properties (Vendor-Neutral: Intel, Realtek, Killer, Marvell)
-    Write-Host "[2/4] Disabling Latency Flags across all NIC Vendors..." -ForegroundColor Yellow
+    # 2. NIC driver properties (vendor-neutral: Intel, Realtek, Killer, Marvell)
     $vendorKeywords = @(
         "EnableGreenEthernet", "GigaLite", "PowerSavingMode", "AdvancedEEE", "EEELinkAdvertisement",
         "*EnergyEfficientEthernet", "*ReduceSpeedOnPowerDown", "*PowerDownPcie", "*ModernStandby",
@@ -385,7 +389,7 @@ function Apply-Optimizations {
         foreach ($kw in $vendorKeywords) {
             Set-NetAdapterAdvancedProperty -Name $a.Name -RegistryKeyword $kw -RegistryValue 0 -ErrorAction SilentlyContinue
         }
-        # Fallback wildcard matching for proprietary displays
+        # Fallback wildcard matching for proprietary display names
         $displayPatterns = @("*Green*", "*Gigabit Lite*", "*Power Saving*", "*Energy Efficient*", "*Flow Control*", "*Large Send Offload*")
         foreach ($pattern in $displayPatterns) {
             Set-NetAdapterAdvancedProperty -Name $a.Name -DisplayName $pattern -DisplayValue "Disabled" -ErrorAction SilentlyContinue
@@ -403,63 +407,71 @@ function Apply-Optimizations {
             ($p.DisplayValue -eq "Enabled" -or $p.RegistryValue -contains 1 -or $p.RegistryValue -contains "1")
         })
         if ($stillActive.Count -eq 0) {
-            Write-Host "  [OK] '$($a.Name)': latency-related driver flags disabled and verified" -ForegroundColor Green
+            Write-Status OK "$($a.Name): latency-related driver flags disabled and verified"
         } else {
             $names = ($stillActive | ForEach-Object { if ($_.DisplayName) { $_.DisplayName } else { $_.RegistryKeyword } } | Select-Object -Unique) -join ", "
-            Write-Host "  [WARN] '$($a.Name)': driver refused to change: $names" -ForegroundColor Yellow
+            Write-Status WARN "$($a.Name): driver refused to change: $names"
         }
     }
 
-    # 3. Windows Gaming Priority & MMCSS
-    Write-Host "[3/4] Tuning Windows Multimedia Scheduler for Max Game Priority..." -ForegroundColor Yellow
+    # 3. Windows multimedia scheduler
     $sysProfile = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
     Set-ItemProperty -Path $sysProfile -Name "NetworkThrottlingIndex" -Value 0xFFFFFFFF -Type DWord -Force -ErrorAction SilentlyContinue
     Set-ItemProperty -Path $sysProfile -Name "SystemResponsiveness" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-    Write-Host "  [OK] NetworkThrottlingIndex disabled & SystemResponsiveness set to 0 (Max Priority)" -ForegroundColor Green
+    Write-Status OK "NetworkThrottlingIndex disabled, SystemResponsiveness set to 0"
 
-    # 4. TCP Stack Tuning & DNS Flush
-    Write-Host "[4/4] Optimizing TCP Window Autotuning & Flushing DNS..." -ForegroundColor Yellow
+    # 4. TCP stack and DNS cache
     netsh int tcp set global autotuninglevel=normal | Out-Null
     netsh int tcp set global rss=enabled | Out-Null
     netsh int tcp set global fastopen=enabled | Out-Null
     Clear-DnsClientCache
-    Write-Host "  [OK] TCP Window Autotuning set to Normal, RSS Enabled, DNS Flushed" -ForegroundColor Green
-    Write-Host ""
+    Write-Status OK "TCP autotuning normal, RSS enabled, TCP Fast Open enabled, DNS cache flushed"
+}
+
+function Show-ResultsComparison {
+    param($Before, $After)
+    Write-Section "Results (before / after)"
+    $rows = @(
+        @{ Label = "Internet latency"; Before = "$($Before.WanAvg) ms";    After = "$($After.WanAvg) ms" }
+        @{ Label = "Jitter";           Before = "$($Before.WanJitter) ms"; After = "$($After.WanJitter) ms" }
+        @{ Label = "Packet loss";      Before = "$($Before.WanLoss)%";     After = "$($After.WanLoss)%" }
+        @{ Label = "Gateway latency";  Before = "$($Before.GwLatency) ms"; After = "$($After.GwLatency) ms" }
+        @{ Label = "Path MTU";         Before = "$($Before.OptimalMTU)";   After = "$($After.OptimalMTU) (applied)" }
+    )
+    foreach ($r in $rows) {
+        Write-Host ("  {0,-18} {1,12}  ->  {2}" -f $r.Label, $r.Before, $r.After) -ForegroundColor White
+    }
 }
 
 function Restore-Defaults {
     Show-Header
     $hasBackup = Test-Path $script:BackupPath
-    Write-Host "==========================================================================" -ForegroundColor Yellow
-    Write-Host "                       RESTORE NETWORK SETTINGS                           " -ForegroundColor Yellow
-    Write-Host "==========================================================================" -ForegroundColor Yellow
-    Write-Host ""
+    Write-Section "Restore network settings"
     if ($hasBackup) {
         $backupDate = try { (Get-Content $script:BackupPath -Raw | ConvertFrom-Json).CreatedAt } catch { "unknown date" }
-        Write-Host "A backup of your original settings was found (taken $backupDate)." -ForegroundColor White
-        Write-Host "This will restore, per adapter, exactly what NetDoctor found before optimizing:" -ForegroundColor White
-        Write-Host "  - Original IPv4 MTU values" -ForegroundColor Gray
-        Write-Host "  - Original NIC advanced driver properties" -ForegroundColor Gray
-        Write-Host "  - Original NetworkThrottlingIndex / SystemResponsiveness registry values" -ForegroundColor Gray
+        Write-Host "  A backup of your original settings exists (taken $backupDate)." -ForegroundColor White
+        Write-Host "  Restoring will replay, per adapter, exactly what NetDoctor found before optimizing:" -ForegroundColor Gray
+        Write-Host "    - Original IPv4 MTU values" -ForegroundColor Gray
+        Write-Host "    - Original NIC advanced driver properties" -ForegroundColor Gray
+        Write-Host "    - Original NetworkThrottlingIndex / SystemResponsiveness registry values" -ForegroundColor Gray
     } else {
-        Write-Host "No NetDoctor backup found - falling back to stock Windows defaults:" -ForegroundColor White
-        Write-Host "  - IPv4 MTU 1500 on physical adapters" -ForegroundColor Gray
-        Write-Host "  - NIC advanced properties reset to driver defaults" -ForegroundColor Gray
-        Write-Host "  - NetworkThrottlingIndex = 10, SystemResponsiveness = 20" -ForegroundColor Gray
+        Write-Host "  No NetDoctor backup found - falling back to stock Windows defaults:" -ForegroundColor White
+        Write-Host "    - IPv4 MTU 1500 on physical adapters" -ForegroundColor Gray
+        Write-Host "    - NIC advanced properties reset to driver defaults" -ForegroundColor Gray
+        Write-Host "    - NetworkThrottlingIndex = 10, SystemResponsiveness = 20" -ForegroundColor Gray
     }
-    Write-Host "  - TCP autotuning back to normal, DNS cache flushed" -ForegroundColor Gray
+    Write-Host "    - TCP autotuning back to normal, DNS cache flushed" -ForegroundColor Gray
     Write-Host ""
 
-    $confirm = Read-Host "Proceed with restore? (Y/N)"
+    $confirm = Read-Host "  Proceed with restore? (Y/N)"
     if ($confirm -ne "Y" -and $confirm -ne "y") {
-        Write-Host "Operation cancelled." -ForegroundColor Gray
+        Write-Status INFO "Operation cancelled."
         Write-Host ""
-        Read-Host "Press Enter to return to menu..."
+        Read-Host "  Press Enter to return to the menu"
         return
     }
 
-    Write-Host ""
-    Write-Host "Reverting network settings..." -ForegroundColor Yellow
+    Write-Section "Restoring"
     $sysProfile = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
 
     if ($hasBackup) {
@@ -467,7 +479,7 @@ function Restore-Defaults {
 
         foreach ($ba in $backup.Adapters) {
             if (-not (Get-NetAdapter -Name $ba.Name -ErrorAction SilentlyContinue)) {
-                Write-Host "  [SKIP] Adapter '$($ba.Name)' from backup no longer present" -ForegroundColor Yellow
+                Write-Status WARN "Adapter '$($ba.Name)' from backup no longer present - skipped"
                 continue
             }
             netsh interface ipv4 set subinterface "$($ba.Name)" mtu=$($ba.Mtu) store=persistent | Out-Null
@@ -476,22 +488,22 @@ function Restore-Defaults {
                 Set-NetAdapterAdvancedProperty -Name $ba.Name -RegistryKeyword $p.Keyword -RegistryValue @($p.Value) -ErrorAction SilentlyContinue
                 if ($?) { $restored++ } else { $failed++ }
             }
-            Write-Host "  [OK] '$($ba.Name)': MTU restored to $($ba.Mtu), $restored driver properties restored$(if ($failed) { ", $failed skipped" })" -ForegroundColor Green
+            Write-Status OK "$($ba.Name): MTU restored to $($ba.Mtu), $restored driver properties restored$(if ($failed) { ", $failed skipped" })"
         }
 
         foreach ($regName in @("NetworkThrottlingIndex", "SystemResponsiveness")) {
             $val = $backup.Registry.$regName
             if ($null -ne $val -and "$val" -ne "") {
                 Set-ItemProperty -Path $sysProfile -Name $regName -Value ([uint32]"$val") -Type DWord -Force -ErrorAction SilentlyContinue
-                Write-Host "  [OK] $regName restored to $val" -ForegroundColor Green
+                Write-Status OK "$regName restored to $val"
             } else {
                 Remove-ItemProperty -Path $sysProfile -Name $regName -Force -ErrorAction SilentlyContinue
-                Write-Host "  [OK] $regName removed (was not set originally)" -ForegroundColor Green
+                Write-Status OK "$regName removed (was not set originally)"
             }
         }
 
         Remove-Item $script:BackupPath -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] Backup consumed and removed - next optimization takes a fresh snapshot" -ForegroundColor Gray
+        Write-Status INFO "Backup consumed and removed - the next optimization takes a fresh snapshot"
     } else {
         # Stock defaults path. Only touch physical adapters: forcing MTU 1500 on
         # a VPN/virtual interface (WireGuard, Hyper-V) can break its tunnel.
@@ -499,116 +511,128 @@ function Restore-Defaults {
         foreach ($a in $adapters) {
             netsh interface ipv4 set subinterface "$($a.Name)" mtu=1500 store=persistent | Out-Null
             Reset-NetAdapterAdvancedProperty -Name $a.Name -DisplayName "*" -ErrorAction SilentlyContinue
-            Write-Host "  [OK] '$($a.Name)': MTU reset to 1500, NIC properties reset to driver defaults" -ForegroundColor Green
+            Write-Status OK "$($a.Name): MTU reset to 1500, NIC properties reset to driver defaults"
         }
         Set-ItemProperty -Path $sysProfile -Name "NetworkThrottlingIndex" -Value 10 -Type DWord -Force -ErrorAction SilentlyContinue
         Set-ItemProperty -Path $sysProfile -Name "SystemResponsiveness" -Value 20 -Type DWord -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] NetworkThrottlingIndex = 10, SystemResponsiveness = 20 (Windows defaults)" -ForegroundColor Green
+        Write-Status OK "NetworkThrottlingIndex = 10, SystemResponsiveness = 20 (Windows defaults)"
     }
 
     netsh int tcp set global autotuninglevel=normal | Out-Null
     Clear-DnsClientCache
-    Write-Host "  [OK] TCP autotuning set to normal, DNS cache flushed" -ForegroundColor Green
+    Write-Status OK "TCP autotuning set to normal, DNS cache flushed"
 
     Write-Host ""
-    Write-Host "Network settings restored successfully." -ForegroundColor Green
+    Write-Host "  Network settings restored successfully." -ForegroundColor Green
     Write-Host ""
-    Read-Host "Press Enter to return to menu..."
+    Read-Host "  Press Enter to return to the menu"
 }
 
 # --- Interactive Main Loop ---
 while ($true) {
     Show-Header
-    Write-Host "  [1] 🚀 FULL AUTO-FIX FOR GAMERS (Diagnose -> Optimize -> Verify)" -ForegroundColor Green
-    Write-Host "  [2] 🔍 DIAGNOSE ONLY (Check Packet Loss, Jitter & MTU Boundary)" -ForegroundColor Yellow
-    Write-Host "  [3] ⚡ APPLY GAMING OPTIMIZATIONS ONLY" -ForegroundColor Cyan
-    Write-Host "  [4] 🌐 CLOUDFLARE SPEED & LOADED LATENCY TEST" -ForegroundColor Magenta
-    Write-Host "  [5] 🔄 RESTORE WINDOWS DEFAULT SETTINGS (Safety Revert)" -ForegroundColor DarkYellow
-    Write-Host "  [0] ❌ EXIT" -ForegroundColor Gray
+    Write-Host "   1  Full optimization     diagnose, apply, verify, save report" -ForegroundColor White
+    Write-Host "   2  Diagnostics only      read-only health check, no changes" -ForegroundColor White
+    Write-Host "   3  Apply optimizations   apply without the pre-diagnosis output" -ForegroundColor White
+    Write-Host "   4  Speed test            Cloudflare download benchmark" -ForegroundColor White
+    Write-Host "   5  Restore settings      revert to backup or Windows defaults" -ForegroundColor White
+    Write-Host "   0  Exit" -ForegroundColor DarkGray
     Write-Host ""
-    $choice = Read-Host "Select an option (0-5)"
+    $choice = Read-Host "  Select an option (0-5)"
 
     switch ($choice) {
         "1" {
             Show-Header
-            Write-Host ">>> PHASE 1: INITIAL DIAGNOSIS" -ForegroundColor Cyan
+            Write-Host "  Phase 1/3: initial diagnosis" -ForegroundColor Cyan
             $before = Run-Diagnostics
-            
-            Write-Host ""
+
+            Write-Section "Findings"
             if ($before.Issues.Count -gt 0) {
-                Write-Host "Found $($before.Issues.Count) bottleneck(s) affecting gaming performance!" -ForegroundColor Yellow
-                foreach ($iss in $before.Issues) { Write-Host "  • $iss" -ForegroundColor Red }
+                Write-Status WARN "$($before.Issues.Count) issue(s) found:"
+                foreach ($iss in $before.Issues) { Write-Host "    - $iss" -ForegroundColor Yellow }
             } else {
-                Write-Host "Connection is healthy, optimizing hardware and Windows settings..." -ForegroundColor Green
+                Write-Status OK "No issues found. Applying preventive optimizations anyway."
             }
 
+            Write-Host ""
+            Write-Host "  Phase 2/3: applying optimizations" -ForegroundColor Cyan
             Apply-Optimizations -Diag $before
 
-            Write-Host ">>> PHASE 2: POST-OPTIMIZATION VERIFICATION" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Phase 3/3: post-optimization verification" -ForegroundColor Cyan
             $after = Run-Diagnostics
-            
-            # Save Report
+
+            Show-ResultsComparison -Before $before -After $after
+
+            # Save report
             $desktopDir = [Environment]::GetFolderPath("Desktop")
             $reportPath = if ($PSScriptRoot) { [System.IO.Path]::Combine($PSScriptRoot, "NetDoctor_Report.txt") } else { [System.IO.Path]::Combine($desktopDir, "NetDoctor_Report.txt") }
-            
+
             $reportContent = @"
 ==========================================================================
-                 NETDOCTOR GAMING OPTIMIZATION REPORT                     
+ NetDoctor v$script:Version - Optimization Report
 ==========================================================================
-Date: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-Optimal Path MTU: $($after.OptimalMTU)
-Local Router Latency: $($after.GwLatency) ms
-Internet Ping: $($after.WanAvg) ms
-Ping Jitter: $($after.WanJitter) ms
-Packet Loss: $($after.WanLoss)%
+ Date:             $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 
-Issues Resolved:
-$($before.Issues | ForEach-Object { " - $_" } | Out-String)
-Gaming Status: READY FOR COMPETITIVE GAMING (VALORANT / CS2 / FORTNITE / WARZONE)
+ Measurements                  Before          After
+   Internet latency            $($before.WanAvg) ms$(" " * [math]::Max(1, 16 - "$($before.WanAvg) ms".Length))$($after.WanAvg) ms
+   Jitter                      $($before.WanJitter) ms$(" " * [math]::Max(1, 16 - "$($before.WanJitter) ms".Length))$($after.WanJitter) ms
+   Packet loss                 $($before.WanLoss)%$(" " * [math]::Max(1, 16 - "$($before.WanLoss)%".Length))$($after.WanLoss)%
+   Gateway latency             $($before.GwLatency) ms$(" " * [math]::Max(1, 16 - "$($before.GwLatency) ms".Length))$($after.GwLatency) ms
+   Path MTU (applied)          $($after.OptimalMTU)
+
+ Issues found before optimizing:
+$(if ($before.Issues.Count) { $before.Issues | ForEach-Object { "   - $_" } | Out-String } else { "   (none)`n" })
+ Settings backup:  $(if (Test-Path $script:BackupPath) { $script:BackupPath } else { "consumed by a restore" })
+ Revert anytime:   re-run NetDoctor and choose option 5 (Restore settings)
 ==========================================================================
 "@
             $reportContent | Set-Content -Path $reportPath -Encoding utf8
 
             Write-Host ""
-            Write-Host "==========================================================================" -ForegroundColor Green
-            Write-Host "✅ GAMING OPTIMIZATION COMPLETE! Report saved to:" -ForegroundColor Green
-            Write-Host "   $reportPath" -ForegroundColor White
-            Write-Host "==========================================================================" -ForegroundColor Green
+            Write-Status OK "Optimization complete. Report saved to $reportPath"
             Write-Host ""
-            Read-Host "Press Enter to return to menu..."
+            Read-Host "  Press Enter to return to the menu"
         }
         "2" {
             Show-Header
             $diag = Run-Diagnostics
-            Write-Host ""
+            Write-Section "Findings"
             if ($diag.Issues.Count -eq 0) {
-                Write-Host "✅ NO ISSUES FOUND! Network is primed for low-latency gaming." -ForegroundColor Green
+                Write-Status OK "No issues found. Network configuration looks healthy."
             } else {
-                Write-Host "⚠️ ISSUES FOUND ($($diag.Issues.Count)):" -ForegroundColor Red
-                foreach ($iss in $diag.Issues) { Write-Host "  • $iss" -ForegroundColor Yellow }
+                Write-Status WARN "$($diag.Issues.Count) issue(s) found:"
+                foreach ($iss in $diag.Issues) { Write-Host "    - $iss" -ForegroundColor Yellow }
+                Write-Host ""
+                Write-Status INFO "Run option 1 or 3 to fix these automatically. A backup is taken first."
             }
             Write-Host ""
-            Read-Host "Press Enter to return to menu..."
+            Read-Host "  Press Enter to return to the menu"
         }
         "3" {
             Show-Header
+            Write-Status INFO "Running silent diagnosis to determine optimal values..."
             $diag = Run-Diagnostics -Silent
             Apply-Optimizations -Diag $diag
             Write-Host ""
-            Write-Host "✅ Gaming optimizations applied successfully!" -ForegroundColor Green
-            Read-Host "Press Enter to return to menu..."
+            Write-Status OK "Optimizations applied. Revert anytime with option 5."
+            Read-Host "  Press Enter to return to the menu"
         }
         "4" {
             Show-Header
             Run-CloudflareTest
             Write-Host ""
-            Read-Host "Press Enter to return to menu..."
+            Read-Host "  Press Enter to return to the menu"
         }
         "5" {
             Restore-Defaults
         }
         "0" {
             exit
+        }
+        default {
+            Write-Status WARN "Invalid selection '$choice' - choose 0-5."
+            Start-Sleep -Seconds 1
         }
     }
 }
